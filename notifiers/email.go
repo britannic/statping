@@ -226,7 +226,7 @@ func (u *email) OnTest() error {
 	testService := &types.Service{
 		Id:             1,
 		Name:           "Example Service",
-		Domain:         "https://www.youtube.com/watch?v=-u6DvRyyKGU",
+		Domain:         "https://www.jw.org/en/bible-teachings/online-lessons/",
 		ExpectedStatus: 200,
 		Interval:       30,
 		Type:           "http",

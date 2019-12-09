@@ -13,7 +13,7 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
-	"github.com/hunterlong/statping/types"
+	"github.com/britannic/statping/types"
 	"github.com/vektah/gqlparser"
 	"github.com/vektah/gqlparser/ast"
 )

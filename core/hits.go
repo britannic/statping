@@ -16,8 +16,8 @@
 package core
 
 import (
-	"github.com/hunterlong/statping/types"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/types"
+	"github.com/britannic/statping/utils"
 	"time"
 )
 

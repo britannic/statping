@@ -17,7 +17,7 @@
 package main
 
 import (
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/utils"
 	"io/ioutil"
 	"log"
 	"os"

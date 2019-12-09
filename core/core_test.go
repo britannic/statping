@@ -16,8 +16,8 @@
 package core
 
 import (
-	"github.com/hunterlong/statping/source"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/source"
+	"github.com/britannic/statping/utils"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"

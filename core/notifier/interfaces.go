@@ -15,7 +15,7 @@
 
 package notifier
 
-import "github.com/hunterlong/statping/types"
+import "github.com/britannic/statping/types"
 
 // Notifier interface is required to create a new Notifier
 type Notifier interface {

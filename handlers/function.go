@@ -3,9 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/hunterlong/statping/core"
-	"github.com/hunterlong/statping/types"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/core"
+	"github.com/britannic/statping/types"
+	"github.com/britannic/statping/utils"
 	"html/template"
 	"net/http"
 	"reflect"

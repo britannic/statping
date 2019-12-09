@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"fmt"
-	_ "github.com/hunterlong/statping/notifiers"
-	"github.com/hunterlong/statping/source"
-	"github.com/hunterlong/statping/utils"
+	_ "github.com/britannic/statping/notifiers"
+	"github.com/britannic/statping/source"
+	"github.com/britannic/statping/utils"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"net/http"

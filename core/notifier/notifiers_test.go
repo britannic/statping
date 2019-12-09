@@ -17,8 +17,8 @@ package notifier
 
 import (
 	"fmt"
-	"github.com/hunterlong/statping/types"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/types"
+	"github.com/britannic/statping/utils"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	"github.com/stretchr/testify/assert"

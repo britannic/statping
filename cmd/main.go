@@ -18,11 +18,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/hunterlong/statping/core"
-	"github.com/hunterlong/statping/handlers"
-	"github.com/hunterlong/statping/plugin"
-	"github.com/hunterlong/statping/source"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/core"
+	"github.com/britannic/statping/handlers"
+	"github.com/britannic/statping/plugin"
+	"github.com/britannic/statping/source"
+	"github.com/britannic/statping/utils"
 	"github.com/joho/godotenv"
 	"os"
 )

@@ -16,7 +16,7 @@
 package notifiers
 
 import (
-	"github.com/hunterlong/statping/core/notifier"
+	"github.com/britannic/statping/core/notifier"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"

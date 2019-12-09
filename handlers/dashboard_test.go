@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/utils"
 	"github.com/stretchr/testify/assert"
 	"net/url"
 	"testing"

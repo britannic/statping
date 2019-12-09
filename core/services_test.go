@@ -16,7 +16,7 @@
 package core
 
 import (
-	"github.com/hunterlong/statping/types"
+	"github.com/britannic/statping/types"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"

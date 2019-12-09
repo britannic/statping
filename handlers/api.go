@@ -18,10 +18,10 @@ package handlers
 import (
 	"errors"
 	"fmt"
-	"github.com/hunterlong/statping/core"
-	"github.com/hunterlong/statping/core/notifier"
-	"github.com/hunterlong/statping/types"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/core"
+	"github.com/britannic/statping/core/notifier"
+	"github.com/britannic/statping/types"
+	"github.com/britannic/statping/utils"
 	"net/http"
 )
 

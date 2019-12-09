@@ -11,21 +11,21 @@ model:
   filename: models_gen.go
 models:
   Core:
-    model: github.com/hunterlong/statping/types.Core
+    model: github.com/britannic/statping/types.Core
   Message:
-    model: github.com/hunterlong/statping/types.Message
+    model: github.com/britannic/statping/types.Message
   Group:
-    model: github.com/hunterlong/statping/types.Group
+    model: github.com/britannic/statping/types.Group
   Service:
-    model: github.com/hunterlong/statping/types.Service
+    model: github.com/britannic/statping/types.Service
   User:
-    model: github.com/hunterlong/statping/types.User
+    model: github.com/britannic/statping/types.User
   Failure:
-    model: github.com/hunterlong/statping/types.Failure
+    model: github.com/britannic/statping/types.Failure
   Checkin:
-    model: github.com/hunterlong/statping/types.Checkin
+    model: github.com/britannic/statping/types.Checkin
   CheckinHit:
-    model: github.com/hunterlong/statping/types.CheckinHit
+    model: github.com/britannic/statping/types.CheckinHit
   ID:
     model:
       - github.com/99designs/gqlgen/graphql.Int64

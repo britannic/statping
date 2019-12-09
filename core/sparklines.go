@@ -1,7 +1,7 @@
 package core
 
 import (
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/utils"
 	"strings"
 	"time"
 )

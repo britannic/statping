@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/gorilla/mux"
-	"github.com/hunterlong/statping/core"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/core"
+	"github.com/britannic/statping/utils"
 	"net/http"
 )
 

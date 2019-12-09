@@ -16,9 +16,9 @@
 package main
 
 import (
-	"github.com/hunterlong/statping/core"
-	"github.com/hunterlong/statping/source"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/core"
+	"github.com/britannic/statping/source"
+	"github.com/britannic/statping/utils"
 	"github.com/rendon/testcli"
 	"github.com/stretchr/testify/assert"
 	"os"

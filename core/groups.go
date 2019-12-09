@@ -1,7 +1,7 @@
 package core
 
 import (
-	"github.com/hunterlong/statping/types"
+	"github.com/britannic/statping/types"
 	"sort"
 	"time"
 )

@@ -103,14 +103,14 @@ docs:
 	printf "# Statping Dev Documentation\n" > dev/README.md
 	printf "This readme is automatically generated from the Golang documentation. [![GoDoc](https://godoc.org/github.com/golang/gddo?status.svg)](https://godoc.org/github.com/hunterlong/statping)\n\n" > dev/README.md
 	godocdown github.com/hunterlong/statping >> dev/README.md
-	godocdown github.com/hunterlong/statping/cmd >> dev/README.md
-	godocdown github.com/hunterlong/statping/core >> dev/README.md
-	godocdown github.com/hunterlong/statping/handlers >> dev/README.md
-	godocdown github.com/hunterlong/statping/notifiers >> dev/README.md
-	godocdown github.com/hunterlong/statping/plugin >> dev/README.md
-	godocdown github.com/hunterlong/statping/source >> dev/README.md
-	godocdown github.com/hunterlong/statping/types >> dev/README.md
-	godocdown github.com/hunterlong/statping/utils >> dev/README.md
+	godocdown github.com/britannic/statping/cmd >> dev/README.md
+	godocdown github.com/britannic/statping/core >> dev/README.md
+	godocdown github.com/britannic/statping/handlers >> dev/README.md
+	godocdown github.com/britannic/statping/notifiers >> dev/README.md
+	godocdown github.com/britannic/statping/plugin >> dev/README.md
+	godocdown github.com/britannic/statping/source >> dev/README.md
+	godocdown github.com/britannic/statping/types >> dev/README.md
+	godocdown github.com/britannic/statping/utils >> dev/README.md
 	gocov-html coverage.json > dev/COVERAGE.html
 	revive -formatter stylish > dev/LINT.md
 

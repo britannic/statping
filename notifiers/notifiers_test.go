@@ -16,10 +16,10 @@
 package notifiers
 
 import (
-	"github.com/hunterlong/statping/core/notifier"
-	"github.com/hunterlong/statping/source"
-	"github.com/hunterlong/statping/types"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/core/notifier"
+	"github.com/britannic/statping/source"
+	"github.com/britannic/statping/types"
+	"github.com/britannic/statping/utils"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	"time"

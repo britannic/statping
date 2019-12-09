@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/GeertJohan/go.rice"
-	"github.com/hunterlong/statping/utils"
+	"github.com/britannic/statping/utils"
 	"gopkg.in/russross/blackfriday.v2"
 	"io/ioutil"
 	"os"

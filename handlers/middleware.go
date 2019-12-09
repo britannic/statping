@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/hunterlong/statping/core"
+	"github.com/britannic/statping/core"
 	"net/http"
 	"net/http/httptest"
 	"time"

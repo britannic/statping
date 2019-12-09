@@ -3,9 +3,9 @@ package graphql
 
 import (
 	"context"
-	"github.com/hunterlong/statping/core"
+	"github.com/britannic/statping/core"
 
-	"github.com/hunterlong/statping/types"
+	"github.com/britannic/statping/types"
 )
 
 // THIS CODE IS A STARTING POINT ONLY. IT WILL NOT BE UPDATED WITH SCHEMA CHANGES.

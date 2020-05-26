@@ -11,6 +11,7 @@ require (
 	github.com/alecthomas/gometalinter v3.0.0+incompatible // indirect
 	github.com/ararog/timeago v0.0.0-20160324182854-518814407569
 	github.com/armon/go-radix v1.0.0 // indirect
+	github.com/axw/gocov v1.0.0 // indirect
 	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/britannic/godoc2md v0.0.0-20180717000503-586c20adbfb9 // indirect
 	github.com/britannic/godocdown v0.0.0-20130622164427-0bfa04905481 // indirect
@@ -30,6 +31,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0
 	github.com/jmank88/nuts v0.4.0 // indirect
 	github.com/joho/godotenv v1.3.0
+	github.com/karalabe/xgo v0.0.0-20191115072854-c5ccff8648a7 // indirect
 	github.com/karrick/godirwalk v1.13.0 // indirect
 	github.com/lib/pq v1.2.0
 	github.com/mailru/easyjson v0.7.0 // indirect
@@ -50,7 +52,7 @@ require (
 	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
 	golang.org/x/net v0.0.0-20191014212845-da9a3fd4c582
 	golang.org/x/sys v0.0.0-20191026070338-33540a1f6037
-	golang.org/x/tools v0.0.0-20191125011157-cc15fab314e3 // indirect
+	golang.org/x/tools v0.0.0-20191206204035-259af5ff87bd // indirect
 	google.golang.org/appengine v1.6.5
 	gopkg.in/alecthomas/kingpin.v3-unstable v3.0.0-20191105091915-95d230a53780 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc

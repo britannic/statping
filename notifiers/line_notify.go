@@ -1,46 +1,41 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package notifiers
 
 import (
 	"fmt"
-	"github.com/britannic/statping/core/notifier"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/statping/statping/types/failures"
+	"github.com/statping/statping/types/notifications"
+	"github.com/statping/statping/types/notifier"
+	"github.com/statping/statping/types/services"
+	"github.com/statping/statping/utils"
 )
 
+var _ notifier.Notifier = (*lineNotifier)(nil)
+
 const (
-	lineNotifyMethod = "line notify"
+	lineNotifyMethod = "line_notify"
 )
 
 type lineNotifier struct {
-	*notifier.Notification
+	*notifications.Notification
 }
 
-var LineNotify = &lineNotifier{&notifier.Notification{
+func (l *lineNotifier) Select() *notifications.Notification {
+	return l.Notification
+}
+
+var LineNotify = &lineNotifier{&notifications.Notification{
 	Method:      lineNotifyMethod,
 	Title:       "LINE Notify",
 	Description: "LINE Notify will send notifications to your LINE Notify account when services are offline or online. Based on the <a href=\"https://notify-bot.line.me/doc/en/\">LINE Notify API</a>.",
 	Author:      "Kanin Peanviriyakulkit",
 	AuthorUrl:   "https://github.com/dogrocker",
 	Icon:        "far fa-bell",
-	Form: []notifier.NotificationForm{{
+	Limits:      60,
+	Form: []notifications.NotificationForm{{
 		Type:        "text",
 		Title:       "Access Token",
 		Placeholder: "Insert your Line Notify Access Token here.",
@@ -49,43 +44,31 @@ var LineNotify = &lineNotifier{&notifier.Notification{
 }
 
 // Send will send a HTTP Post with the Authorization to the notify-api.line.me server. It accepts type: string
-func (u *lineNotifier) Send(msg interface{}) error {
-	message := msg.(string)
+func (l *lineNotifier) sendMessage(message string) (string, error) {
 	v := url.Values{}
 	v.Set("message", message)
-	headers := []string{fmt.Sprintf("Authorization=Bearer %v", u.ApiSecret)}
-	_, _, err := utils.HttpRequest("https://notify-api.line.me/api/notify", "POST", "application/x-www-form-urlencoded", headers, strings.NewReader(v.Encode()), time.Duration(10*time.Second), true)
-	return err
-}
-
-func (u *lineNotifier) Select() *notifier.Notification {
-	return u.Notification
+	headers := []string{fmt.Sprintf("Authorization=Bearer %v", l.ApiSecret)}
+	content, _, err := utils.HttpRequest("https://notify-api.line.me/api/notify", "POST", "application/x-www-form-urlencoded", headers, strings.NewReader(v.Encode()), time.Duration(10*time.Second), true, nil)
+	return string(content), err
 }
 
 // OnFailure will trigger failing service
-func (u *lineNotifier) OnFailure(s *types.Service, f *types.Failure) {
+func (l *lineNotifier) OnFailure(s *services.Service, f *failures.Failure) error {
 	msg := fmt.Sprintf("Your service '%v' is currently offline!", s.Name)
-	u.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
+	_, err := l.sendMessage(msg)
+	return err
 }
 
 // OnSuccess will trigger successful service
-func (u *lineNotifier) OnSuccess(s *types.Service) {
-	if !s.Online || !s.SuccessNotified {
-		var msg string
-		if s.UpdateNotify {
-			s.UpdateNotify = false
-		}
-		msg = s.DownText
-
-		u.ResetUniqueQueue(fmt.Sprintf("service_%v", s.Id))
-		u.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
-	}
+func (l *lineNotifier) OnSuccess(s *services.Service) error {
+	msg := fmt.Sprintf("Service %s is online!", s.Name)
+	_, err := l.sendMessage(msg)
+	return err
 }
 
-// OnSave triggers when this notifier has been saved
-func (u *lineNotifier) OnSave() error {
-	msg := fmt.Sprintf("Notification %v is receiving updated information.", u.Method)
-	utils.Log(1, msg)
-	u.AddQueue("saved", msg)
-	return nil
+// OnTest triggers when this notifier has been saved
+func (l *lineNotifier) OnTest() (string, error) {
+	msg := fmt.Sprintf("Testing if Line Notifier is working!")
+	_, err := l.sendMessage(msg)
+	return msg, err
 }

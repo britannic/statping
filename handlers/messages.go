@@ -1,89 +1,55 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package handlers
 
 import (
-	"encoding/json"
-	"fmt"
-	"github.com/gorilla/mux"
-	"github.com/britannic/statping/core"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
 	"net/http"
+
+	"github.com/gorilla/mux"
+	"github.com/statping/statping/types/errors"
+	"github.com/statping/statping/types/messages"
+	"github.com/statping/statping/utils"
 )
 
-func messagesHandler(w http.ResponseWriter, r *http.Request) {
-	if !IsUser(r) {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	messages, _ := core.SelectMessages()
-	ExecuteResponse(w, r, "messages.gohtml", messages, nil)
-}
-
-func viewMessageHandler(w http.ResponseWriter, r *http.Request) {
+func findMessage(r *http.Request) (*messages.Message, int64, error) {
 	vars := mux.Vars(r)
-	id := utils.ToInt(vars["id"])
-	message, err := core.SelectMessage(id)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
+	if utils.NotNumber(vars["id"]) {
+		return nil, 0, errors.NotNumber
 	}
-	ExecuteResponse(w, r, "message.gohtml", message, nil)
+	id := utils.ToInt(vars["id"])
+	message, err := messages.Find(id)
+	if err != nil {
+		return nil, id, err
+	}
+	return message, id, nil
 }
 
-func apiAllMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	messages, err := core.SelectMessages()
-	if err != nil {
-		sendErrorJson(err, w, r)
-		return
-	}
-	returnJson(messages, w, r)
+func apiAllMessagesHandler(r *http.Request) interface{} {
+	msgs := messages.All()
+	return msgs
 }
 
 func apiMessageCreateHandler(w http.ResponseWriter, r *http.Request) {
-	var message *types.Message
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&message)
-	if err != nil {
+	var message *messages.Message
+	if err := DecodeJSON(r, &message); err != nil {
 		sendErrorJson(err, w, r)
 		return
 	}
-	msg := core.ReturnMessage(message)
-	_, err = msg.Create()
-	if err != nil {
+	if err := message.Create(); err != nil {
 		sendErrorJson(err, w, r)
 		return
 	}
-	sendJsonAction(msg, "create", w, r)
+	sendJsonAction(message, "create", w, r)
 }
 
-func apiMessageGetHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	message, err := core.SelectMessage(utils.ToInt(vars["id"]))
+func apiMessageGetHandler(r *http.Request) interface{} {
+	message, _, err := findMessage(r)
 	if err != nil {
-		sendErrorJson(err, w, r)
-		return
+		return err
 	}
-	returnJson(message, w, r)
+	return message
 }
 
 func apiMessageDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	message, err := core.SelectMessage(utils.ToInt(vars["id"]))
+	message, _, err := findMessage(r)
 	if err != nil {
 		sendErrorJson(err, w, r)
 		return
@@ -97,20 +63,16 @@ func apiMessageDeleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiMessageUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	message, err := core.SelectMessage(utils.ToInt(vars["id"]))
-	if err != nil {
-		sendErrorJson(fmt.Errorf("message #%v was not found", vars["id"]), w, r)
-		return
-	}
-	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(&message)
+	message, _, err := findMessage(r)
 	if err != nil {
 		sendErrorJson(err, w, r)
 		return
 	}
-	_, err = message.Update()
-	if err != nil {
+	if err := DecodeJSON(r, &message); err != nil {
+		sendErrorJson(err, w, r)
+		return
+	}
+	if err := message.Update(); err != nil {
 		sendErrorJson(err, w, r)
 		return
 	}

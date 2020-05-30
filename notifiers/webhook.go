@@ -1,49 +1,40 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package notifiers
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/britannic/statping/core/notifier"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/statping/statping/types/failures"
+	"github.com/statping/statping/types/notifications"
+	"github.com/statping/statping/types/notifier"
+	"github.com/statping/statping/types/services"
+	"github.com/statping/statping/utils"
 )
 
+var _ notifier.Notifier = (*webhooker)(nil)
+
 const (
-	webhookMethod = "Webhook"
+	webhookMethod = "webhook"
 )
 
 type webhooker struct {
-	*notifier.Notification
+	*notifications.Notification
 }
 
-var Webhook = &webhooker{&notifier.Notification{
+var Webhook = &webhooker{&notifications.Notification{
 	Method:      webhookMethod,
-	Title:       "HTTP webhooker",
+	Title:       "Webhook",
 	Description: "Send a custom HTTP request to a specific URL with your own body, headers, and parameters.",
 	Author:      "Hunter Long",
 	AuthorUrl:   "https://github.com/hunterlong",
 	Icon:        "fas fa-code-branch",
 	Delay:       time.Duration(1 * time.Second),
-	Form: []notifier.NotificationForm{{
+	Limits:      180,
+	Form: []notifications.NotificationForm{{
 		Type:        "text",
 		Title:       "HTTP Endpoint",
 		Placeholder: "http://webhookurl.com/JW2MCP4SKQP",
@@ -60,8 +51,8 @@ var Webhook = &webhooker{&notifier.Notification{
 	}, {
 		Type:        "textarea",
 		Title:       "HTTP Body",
-		Placeholder: `{"service_id": "%s.Id", "service_name": "%s.Name"}`,
-		SmallText:   "Optional HTTP body for a POST request. You can insert variables into your body request.<br>%service.Id, %service.Name, %service.Online<br>%failure.Issue",
+		Placeholder: `{"service_id": {{.Service.Id}}", "service_name": "{{.Service.Name}"}`,
+		SmallText:   "Optional HTTP body for a POST request. You can insert variables into your body request.<br>{{.Service.Id}}, {{.Service.Name}}, {{.Service.Online}}<br>{{.Failure.Issue}}",
 		DbField:     "Var2",
 	}, {
 		Type:        "text",
@@ -87,18 +78,12 @@ func (w *webhooker) Send(msg interface{}) error {
 	return err
 }
 
-func (w *webhooker) Select() *notifier.Notification {
+func (w *webhooker) Select() *notifications.Notification {
 	return w.Notification
 }
 
-func replaceBodyText(body string, s *types.Service, f *types.Failure) string {
-	body = utils.ConvertInterface(body, s)
-	body = utils.ConvertInterface(body, f)
-	return body
-}
-
 func (w *webhooker) sendHttpWebhook(body string) (*http.Response, error) {
-	utils.Log(1, fmt.Sprintf("sending body: '%v' to %v as a %v request", body, w.Host, w.Var1))
+	utils.Log.Infoln(fmt.Sprintf("sending body: '%v' to %v as a %v request", body, w.Host, w.Var1))
 	client := new(http.Client)
 	client.Timeout = time.Duration(10 * time.Second)
 	var buf *bytes.Buffer
@@ -125,51 +110,41 @@ func (w *webhooker) sendHttpWebhook(body string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return resp, err
 }
 
-func (w *webhooker) OnTest() error {
-	service := &types.Service{
-		Id:             1,
-		Name:           "Interpol - All The Rage Back Home",
-		Domain:         "https://www.youtube.com/watch?v=-u6DvRyyKGU",
-		ExpectedStatus: 200,
-		Interval:       30,
-		Type:           "http",
-		Method:         "GET",
-		Timeout:        20,
-		LastStatusCode: 404,
-		Expected:       types.NewNullString("test example"),
-		LastResponse:   "<html>this is an example response</html>",
-		CreatedAt:      time.Now().Add(-24 * time.Hour),
-	}
-	body := replaceBodyText(w.Var2, service, nil)
+func (w *webhooker) OnTest() (string, error) {
+	body := ReplaceVars(w.Var2, exampleService, exampleFailure)
 	resp, err := w.sendHttpWebhook(body)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	content, err := ioutil.ReadAll(resp.Body)
+	out := fmt.Sprintf("Webhook notifier received: '%v'", string(content))
+	utils.Log.Infoln(out)
+	return out, err
+}
+
+// OnFailure will trigger failing service
+func (w *webhooker) OnFailure(s *services.Service, f *failures.Failure) error {
+	msg := ReplaceVars(w.Var2, s, f)
+	resp, err := w.sendHttpWebhook(msg)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	content, err := ioutil.ReadAll(resp.Body)
-	utils.Log(1, fmt.Sprintf("Webhook notifier received: '%v'", string(content)))
 	return err
 }
 
-// OnFailure will trigger failing service
-func (w *webhooker) OnFailure(s *types.Service, f *types.Failure) {
-	msg := replaceBodyText(w.Var2, s, f)
-	w.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
-}
-
 // OnSuccess will trigger successful service
-func (w *webhooker) OnSuccess(s *types.Service) {
-	if !s.Online {
-		w.ResetUniqueQueue(fmt.Sprintf("service_%v", s.Id))
-		msg := replaceBodyText(w.Var2, s, nil)
-		w.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
+func (w *webhooker) OnSuccess(s *services.Service) error {
+	msg := ReplaceVars(w.Var2, s, nil)
+	resp, err := w.sendHttpWebhook(msg)
+	if err != nil {
+		return err
 	}
-}
-
-// OnSave triggers when this notifier has been saved
-func (w *webhooker) OnSave() error {
-	return nil
+	defer resp.Body.Close()
+	return err
 }

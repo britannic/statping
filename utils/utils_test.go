@@ -1,69 +1,43 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package utils
 
 import (
-	"errors"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
-
-func TestConvertInterface(t *testing.T) {
-	type Service struct {
-		Name   string
-		Domain string
-	}
-	sample := `{"name": "%service.Name", "domain": "%service.Domain"}`
-	input := &Service{"Test Name", "statping.com"}
-	out := ConvertInterface(sample, input)
-	assert.Equal(t, `{"name": "Test Name", "domain": "statping.com"}`, out)
-}
 
 func TestCreateLog(t *testing.T) {
 	err := createLog(Directory)
 	assert.Nil(t, err)
 }
 
+func TestReplaceValue(t *testing.T) {
+	assert.Equal(t, true, replaceVal(true))
+	assert.Equal(t, 42, replaceVal(42))
+	assert.Equal(t, "hello world", replaceVal("hello world"))
+	assert.Equal(t, "5s", replaceVal(time.Duration(5*time.Second)))
+}
+
 func TestInitLogs(t *testing.T) {
 	assert.Nil(t, InitLogs())
-	assert.FileExists(t, Directory+"/logs/statup.log")
+	Log.Infoln("this is a test")
+	assert.FileExists(t, Directory+"/logs/statping.log")
 }
 
 func TestDir(t *testing.T) {
-	assert.Contains(t, Directory, "github.com/hunterlong/statping")
+	assert.Contains(t, Directory, "statping/statping")
 }
 
 func TestCommand(t *testing.T) {
 	t.SkipNow()
-	in, out, err := Command("pwd")
+	_, out, err := Command("/bin/echo", "\"statping testing\"")
 	assert.Nil(t, err)
-	assert.Contains(t, in, "statping")
-	assert.Empty(t, out)
-}
-
-func TestLog(t *testing.T) {
-	assert.Nil(t, Log(0, errors.New("this is a 0 level error")))
-	assert.Nil(t, Log(1, errors.New("this is a 1 level error")))
-	assert.Nil(t, Log(2, errors.New("this is a 2 level error")))
-	assert.Nil(t, Log(3, errors.New("this is a 3 level error")))
-	assert.Nil(t, Log(4, errors.New("this is a 4 level error")))
-	assert.Nil(t, Log(5, errors.New("this is a 5 level error")))
+	assert.Contains(t, out, "statping")
 }
 
 func TestToInt(t *testing.T) {
@@ -80,7 +54,7 @@ func TestToString(t *testing.T) {
 	dir, _ := time.ParseDuration("55s")
 	assert.Equal(t, "55s", ToString(dir))
 	assert.Equal(t, "true", ToString(true))
-	assert.Equal(t, time.Now().Format("Monday January _2, 2006 at 03:04PM"), ToString(time.Now()))
+	assert.Equal(t, Now().Format("Monday January _2, 2006 at 03:04PM"), ToString(Now()))
 }
 
 func ExampleToString() {
@@ -91,6 +65,12 @@ func ExampleToString() {
 
 func TestSaveFile(t *testing.T) {
 	assert.Nil(t, SaveFile(Directory+"/test.txt", []byte("testing saving a file")))
+}
+
+func TestOpenFile(t *testing.T) {
+	f, err := OpenFile(Directory + "/test.txt")
+	require.Nil(t, err)
+	assert.Equal(t, "testing saving a file", f)
 }
 
 func TestFileExists(t *testing.T) {
@@ -126,7 +106,7 @@ func ExampleDurationReadable() {
 func TestLogHTTP(t *testing.T) {
 	req, err := http.NewRequest("GET", "/", nil)
 	assert.Nil(t, err)
-	assert.NotEmpty(t, Http(req))
+	assert.NotNil(t, req)
 }
 
 func TestStringInt(t *testing.T) {
@@ -153,16 +133,16 @@ func TestTimestamp_Ago(t *testing.T) {
 	assert.Equal(t, "Just now", now.Ago())
 }
 
-func TestUnderScoreString(t *testing.T) {
-	assert.Equal(t, "this_is_a_test", UnderScoreString("this is a test"))
-}
-
 func TestHashPassword(t *testing.T) {
 	assert.Equal(t, 60, len(HashPassword("password123")))
 }
 
 func TestNewSHA1Hash(t *testing.T) {
-	assert.NotEmpty(t, NewSHA1Hash(5))
+	hash := NewSHA256Hash()
+	assert.NotEmpty(t, hash)
+	assert.Len(t, hash, 64)
+	assert.Len(t, NewSHA256Hash(), 64)
+	assert.NotEqual(t, hash, NewSHA256Hash())
 }
 
 func TestRandomString(t *testing.T) {
@@ -171,4 +151,47 @@ func TestRandomString(t *testing.T) {
 
 func TestDeleteDirectory(t *testing.T) {
 	assert.Nil(t, DeleteDirectory(Directory+"/logs"))
+}
+
+func TestRenameDirectory(t *testing.T) {
+	assert.Nil(t, CreateDirectory(Directory+"/example"))
+	require.DirExists(t, Directory+"/example")
+	assert.Nil(t, RenameDirectory(Directory+"/example", Directory+"/renamed_example"))
+	require.DirExists(t, Directory+"/renamed_example")
+	assert.Nil(t, os.RemoveAll(Directory+"/renamed_example"))
+}
+
+func TestHttpRequest(t *testing.T) {
+	// Start a local HTTP server
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		// Test request parameters
+		assert.Equal(t, req.URL.String(), "/")
+		assert.Equal(t, req.Header["Aaa"], []string{"bbbb="})
+		assert.Equal(t, req.Header["Ccc"], []string{"ddd"})
+		// Send response to be tested
+		rw.Write([]byte(`OK`))
+	}))
+	// Close the server when test finishes
+	defer server.Close()
+
+	body, resp, err := HttpRequest(server.URL, "GET", "application/json", []string{"aaa=bbbb=", "ccc=ddd"}, nil, 2*time.Second, false, nil)
+
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("OK"), body)
+	assert.Equal(t, resp.StatusCode, 200)
+}
+
+func TestConfigLoad(t *testing.T) {
+	InitCLI()
+	setDefaults()
+
+	s := Params.GetString
+	b := Params.GetBool
+
+	Params.Set("DB_CONN", "sqlite")
+
+	assert.Equal(t, "sqlite", s("DB_CONN"))
+	assert.Equal(t, Directory, s("STATPING_DIR"))
+	assert.True(t, b("SAMPLE_DATA"))
+	assert.True(t, b("ALLOW_REPORTS"))
 }

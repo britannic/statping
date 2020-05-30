@@ -1,0 +1,274 @@
+version: '2.3'
+
+
+###############################################
+#            Statping Full Stack
+#
+#  Statping SQLIte =>   http://localhost:8080
+#  Statping MySQL =>    http://localhost:8081
+#  Statping Postgres => http://localhost:8082
+#  Statping MariaDB =>  http://localhost:8083
+#
+#  Adminer        =>    http://localhost:8282
+#  Prometheus     =>    http://localhost:7050
+#  Grafana        =>    http://localhost:3000
+#
+#  MySQL        =>    http://localhost:3306
+#  Postgres     =>    http://localhost:5432
+#  MariaDB      =>    http://localhost:3307
+#
+###############################################
+
+services:
+
+  statping_sqlite:
+    container_name: statping_sqlite
+    build:
+      context: ../
+    restart: on-failure
+    volumes:
+      - ./docker/statping/sqlite:/app
+      - ./services.yml:/app/services.yml
+    environment:
+      DB_CONN: sqlite
+      API_SECRET: exampleapisecret
+      NAME: Statping
+      DOMAIN: http://localhost:8080
+      DESCRIPTION: This is a dev environment on SQLite!
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: admin
+      SAMPLE_DATA: 'false'
+    ports:
+      - 8080:8080
+    networks:
+      - database
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || false"]
+      timeout: 2s
+      interval: 10s
+      retries: 20
+
+  statping_mysql:
+    container_name: statping_mysql
+    build:
+      context: ../
+    restart: on-failure
+    volumes:
+      - ./docker/statping/mysql:/app
+      - ./services.yml:/app/services.yml
+    environment:
+      DB_CONN: mysql
+      DB_HOST: mysql
+      DB_USER: root
+      DB_PASS: password123
+      DB_DATABASE: statping
+      DB_PORT: 3306
+      API_SECRET: exampleapisecret
+      NAME: Statping MySQL
+      DOMAIN: http://localhost:8081
+      DESCRIPTION: This is a dev environment on MySQL!
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: admin
+      SAMPLE_DATA: 'false'
+    ports:
+      - 8081:8080
+    networks:
+      - database
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || false"]
+      timeout: 2s
+      interval: 10s
+      retries: 20
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  statping_postgres:
+    container_name: statping_postgres
+    build:
+      context: ../
+    restart: on-failure
+    volumes:
+      - ./docker/statping/mysql:/app
+      - ./services.yml:/app/services.yml
+    environment:
+      DB_CONN: postgres
+      DB_HOST: postgres
+      DB_USER: root
+      DB_PASS: password123
+      DB_DATABASE: statping
+      DB_PORT: 5432
+      API_SECRET: exampleapisecret
+      NAME: Statping Postgres
+      DOMAIN: http://localhost:8082
+      DESCRIPTION: This is a dev environment on Postgres!
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: admin
+      SAMPLE_DATA: 'false'
+    ports:
+      - 8082:8080
+    networks:
+      - database
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || false"]
+      timeout: 2s
+      interval: 10s
+      retries: 20
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  statping_mariadb:
+    container_name: statping_mariadb
+    build:
+      context: ../
+    restart: on-failure
+    volumes:
+      - ./docker/statping/mariadb:/app
+      - ./services.yml:/app/services.yml
+    environment:
+      DB_CONN: mysql
+      DB_HOST: mariadb
+      DB_USER: root
+      DB_PASS: password123
+      DB_DATABASE: statping
+      DB_PORT: 3306
+      API_SECRET: exampleapisecret
+      NAME: Statping MariaDB
+      DOMAIN: http://localhost:8083
+      DESCRIPTION: This is a dev environment on MariaDB!
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: admin
+      SAMPLE_DATA: 'false'
+    ports:
+      - 8083:8080
+    networks:
+      - database
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || false"]
+      timeout: 2s
+      interval: 10s
+      retries: 20
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  postgres:
+    container_name: postgres
+    image: postgres
+    volumes:
+      - ./docker/databases/postgres:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: statping
+      POSTGRES_USER: root
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  mysql:
+    container_name: mysql
+    image: mysql:5.7
+    volumes:
+      - ./docker/databases/mysql:/var/lib/mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password123
+      MYSQL_DATABASE: statping
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password123
+    ports:
+      - 3306:3306
+    networks:
+      - database
+    healthcheck:
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      timeout: 20s
+      interval: 15s
+      retries: 30
+
+  mariadb:
+    container_name: mariadb
+    image: mariadb
+    volumes:
+      - ./docker/databases/mariadb:/var/lib/mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password123
+      MYSQL_DATABASE: statping
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password123
+    ports:
+      - 3307:3306
+    networks:
+      - database
+    healthcheck:
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      timeout: 20s
+      interval: 15s
+      retries: 30
+
+  adminer:
+    container_name: adminer
+    image: adminer
+    restart: always
+    networks:
+      - database
+      - frontend
+    ports:
+      - 8282:8080
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.0.0
+    restart: on-failure
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/databases/prometheus:/prometheus
+    ports:
+      - 7050:9090
+    networks:
+      - database
+    healthcheck:
+      test: "/bin/wget -q -Y off http://localhost:9090/status -O /dev/null > /dev/null 2>&1"
+      interval: 10s
+      timeout: 3s
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    restart: on-failure
+    ports:
+      - 3000:3000
+    volumes:
+      - ./docker/grafana:/var/lib/grafana
+      - ./grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./grafana/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml
+      - ./grafana/statping_dashboard.json:/etc/grafana/provisioning/dashboards/statping_dashboard.json
+    environment:
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - frontend
+      - database
+    healthcheck:
+      test: "/usr/bin/wget -q -Y off http://localhost:3000/api/health -O /dev/null > /dev/null 2>&1"
+      interval: 10s
+      retries: 20
+
+networks:
+  frontend:
+  database:

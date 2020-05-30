@@ -1,79 +1,25 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package handlers
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/britannic/statping/core"
-	"github.com/britannic/statping/core/notifier"
-	"github.com/britannic/statping/source"
-	"github.com/britannic/statping/utils"
 	"net/http"
-	"strconv"
+	"os"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/prometheus/common/log"
+	"github.com/statping/statping/source"
+	"github.com/statping/statping/types/errors"
+	"github.com/statping/statping/types/users"
+	"github.com/statping/statping/utils"
 )
 
-func dashboardHandler(w http.ResponseWriter, r *http.Request) {
-	if !IsUser(r) {
-		err := core.ErrorResponse{}
-		ExecuteResponse(w, r, "login.gohtml", err, nil)
-	} else {
-		ExecuteResponse(w, r, "dashboard.gohtml", core.CoreApp, nil)
-	}
-}
-
-func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if sessionStore == nil {
-		resetCookies()
-	}
-	session, _ := sessionStore.Get(r, cookieKey)
-	form := parseForm(r)
-	username := form.Get("username")
-	password := form.Get("password")
-	user, auth := core.AuthUser(username, password)
-	if auth {
-		session.Values["authenticated"] = true
-		session.Values["user_id"] = user.Id
-		session.Values["admin"] = user.Admin.Bool
-		session.Save(r, w)
-		utils.Log(1, fmt.Sprintf("User %v logged in from IP %v", user.Username, r.RemoteAddr))
-		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-	} else {
-		err := core.ErrorResponse{Error: "Incorrect login information submitted, try again."}
-		ExecuteResponse(w, r, "login.gohtml", err, nil)
-	}
-}
-
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
-	session, _ := sessionStore.Get(r, cookieKey)
-	session.Values["authenticated"] = false
-	session.Values["admin"] = false
-	session.Values["user_id"] = 0
-	session.Save(r, w)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func helpHandler(w http.ResponseWriter, r *http.Request) {
-	if !IsUser(r) {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	help := source.HelpMarkdown()
-	ExecuteResponse(w, r, "help.gohtml", help, nil)
+	removeJwtToken(w)
+	out := make(map[string]string)
+	out["status"] = "success"
+	returnJson(out, w, r)
 }
 
 func logsHandler(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +31,99 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 		logs = append(logs, utils.LastLines[i].FormatForHtml()+"\r\n")
 	}
 	utils.LockLines.Unlock()
-	ExecuteResponse(w, r, "logs.gohtml", logs, nil)
+	returnJson(logs, w, r)
+}
+
+type themeApi struct {
+	Directory string `json:"directory,omitempty"`
+	Base      string `json:"base"`
+	Variables string `json:"variables"`
+	Mobile    string `json:"mobile"`
+}
+
+func apiThemeViewHandler(w http.ResponseWriter, r *http.Request) {
+	var base, variables, mobile, dir string
+	assets := utils.Directory + "/assets"
+
+	if _, err := os.Stat(assets); err == nil {
+		dir = assets
+	}
+
+	if dir != "" {
+		base, _ = utils.OpenFile(dir + "/scss/base.scss")
+		variables, _ = utils.OpenFile(dir + "/scss/variables.scss")
+		mobile, _ = utils.OpenFile(dir + "/scss/mobile.scss")
+	} else {
+		base, _ = source.TmplBox.String("scss/base.scss")
+		variables, _ = source.TmplBox.String("scss/variables.scss")
+		mobile, _ = source.TmplBox.String("scss/mobile.scss")
+	}
+
+	resp := &themeApi{
+		Directory: dir,
+		Base:      base,
+		Variables: variables,
+		Mobile:    mobile,
+	}
+	returnJson(resp, w, r)
+}
+
+func apiThemeSaveHandler(w http.ResponseWriter, r *http.Request) {
+	var themes themeApi
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&themes)
+	if err != nil {
+		sendErrorJson(err, w, r)
+		return
+	}
+	if err := source.SaveAsset([]byte(themes.Base), "scss/base.scss"); err != nil {
+		sendErrorJson(err, w, r)
+		return
+	}
+	if err := source.SaveAsset([]byte(themes.Variables), "scss/variables.scss"); err != nil {
+		sendErrorJson(err, w, r)
+		return
+	}
+	if err := source.SaveAsset([]byte(themes.Mobile), "scss/mobile.scss"); err != nil {
+		sendErrorJson(err, w, r)
+		return
+	}
+	if err := source.CompileSASS(source.DefaultScss...); err != nil {
+		sendErrorJson(err, w, r)
+		return
+	}
+	resetRouter()
+	sendJsonAction(themes, "saved", w, r)
+}
+
+func apiThemeCreateHandler(w http.ResponseWriter, r *http.Request) {
+	dir := utils.Params.GetString("STATPING_DIR")
+	if source.UsingAssets(dir) {
+		err := errors.New("assets have already been created")
+		log.Errorln(err)
+		sendErrorJson(err, w, r)
+		return
+	}
+	utils.Log.Infof("creating assets in folder: %s/%s", dir, "assets")
+	if err := source.CreateAllAssets(dir); err != nil {
+		log.Errorln(err)
+		sendErrorJson(err, w, r)
+		return
+	}
+	if err := source.CompileSASS(source.DefaultScss...); err != nil {
+		source.CopyToPublic(source.TmplBox, "css", "main.css")
+		source.CopyToPublic(source.TmplBox, "css", "base.css")
+		log.Errorln("Default 'base.css' was inserted because SASS did not work.")
+	}
+	resetRouter()
+	sendJsonAction(dir+"/assets", "created", w, r)
+}
+
+func apiThemeRemoveHandler(w http.ResponseWriter, r *http.Request) {
+	if err := source.DeleteAllAssets(utils.Directory); err != nil {
+		log.Errorln(fmt.Errorf("error deleting all assets %v", err))
+	}
+	sendJsonAction(utils.Directory+"/assets", "deleted", w, r)
 }
 
 func logsLineHandler(w http.ResponseWriter, r *http.Request) {
@@ -96,25 +134,66 @@ func logsLineHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func exportHandler(w http.ResponseWriter, r *http.Request) {
-	var notifiers []*notifier.Notification
-	for _, v := range core.CoreApp.Notifications {
-		notifier := v.(notifier.Notifier)
-		notifiers = append(notifiers, notifier.Select())
+type JwtClaim struct {
+	Username string `json:"username"`
+	Admin    bool   `json:"admin"`
+	jwt.StandardClaims
+}
+
+func removeJwtToken(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:    cookieKey,
+		Value:   "",
+		Expires: time.Now(),
+	})
+}
+
+func setJwtToken(user *users.User, w http.ResponseWriter) (JwtClaim, string) {
+	expirationTime := time.Now().Add(72 * time.Hour)
+	jwtClaim := JwtClaim{
+		Username: user.Username,
+		Admin:    user.Admin.Bool,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+		}}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwtClaim)
+	tokenString, err := token.SignedString([]byte(jwtKey))
+	if err != nil {
+		log.Errorln("error setting token: ", err)
 	}
+	user.Token = tokenString
+	// set cookies
+	http.SetCookie(w, &http.Cookie{
+		Name:    cookieKey,
+		Value:   tokenString,
+		Expires: expirationTime,
+	})
+	return jwtClaim, tokenString
+}
 
-	export, _ := core.ExportSettings()
+func apiLoginHandler(w http.ResponseWriter, r *http.Request) {
+	form := parseForm(r)
+	username := form.Get("username")
+	password := form.Get("password")
 
-	mime := http.DetectContentType(export)
-	fileSize := len(string(export))
-
-	w.Header().Set("Content-Type", mime)
-	w.Header().Set("Content-Disposition", "attachment; filename=export.json")
-	w.Header().Set("Expires", "0")
-	w.Header().Set("Content-Transfer-Encoding", "binary")
-	w.Header().Set("Content-Length", strconv.Itoa(fileSize))
-	w.Header().Set("Content-Control", "private, no-transform, no-store, must-revalidate")
-
-	http.ServeContent(w, r, "export.json", time.Now(), bytes.NewReader(export))
-
+	user, auth := users.AuthUser(username, password)
+	if auth {
+		log.Infoln(fmt.Sprintf("User %v logged in from IP %v", user.Username, r.RemoteAddr))
+		claim, token := setJwtToken(user, w)
+		resp := struct {
+			Token   string `json:"token"`
+			IsAdmin bool   `json:"admin"`
+		}{
+			token,
+			claim.Admin,
+		}
+		returnJson(resp, w, r)
+	} else {
+		resp := struct {
+			Error string `json:"error"`
+		}{
+			"incorrect authentication",
+		}
+		returnJson(resp, w, r)
+	}
 }

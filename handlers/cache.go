@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/statping/statping/utils"
 	"sync"
 	"time"
 )
@@ -12,6 +13,9 @@ type Cacher interface {
 	Delete(key string)
 	Set(key string, content []byte, duration time.Duration)
 	List() map[string]Item
+	Lock()
+	Unlock()
+	StopRoutine()
 }
 
 // Item is a cached reference
@@ -20,26 +24,62 @@ type Item struct {
 	Expiration int64
 }
 
+// cleanRoutine is a go routine to automatically remove expired caches that haven't been hit recently
+func cleanRoutine(s *Storage) {
+	duration := 5 * time.Second
+
+CacheRoutine:
+	for {
+		select {
+		case <-s.running:
+			break CacheRoutine
+		case <-time.After(duration):
+			duration = 5 * time.Second
+			for k, v := range s.List() {
+				if v.Expired() {
+					s.Delete(k)
+				}
+			}
+		}
+	}
+}
+
 // Expired returns true if the item has expired.
 func (item Item) Expired() bool {
 	if item.Expiration == 0 {
 		return false
 	}
-	return time.Now().UnixNano() > item.Expiration
+	return utils.Now().UnixNano() > item.Expiration
 }
 
 //Storage mecanism for caching strings in memory
 type Storage struct {
-	items map[string]Item
-	mu    *sync.RWMutex
+	items   map[string]Item
+	mu      *sync.RWMutex
+	running chan bool
 }
 
 //NewStorage creates a new in memory CacheStorage
 func NewStorage() *Storage {
-	return &Storage{
-		items: make(map[string]Item),
-		mu:    &sync.RWMutex{},
+	storage := &Storage{
+		items:   make(map[string]Item),
+		mu:      &sync.RWMutex{},
+		running: make(chan bool),
 	}
+	go cleanRoutine(storage)
+	return storage
+}
+
+func (s Storage) StopRoutine() {
+	close(s.running)
+}
+
+func (s Storage) Lock() {
+	s.mu.Lock()
+}
+
+func (s Storage) Unlock() {
+	s.mu.Unlock()
 }
 
 func (s Storage) List() map[string]Item {
@@ -68,6 +108,6 @@ func (s Storage) Set(key string, content []byte, duration time.Duration) {
 	defer s.mu.Unlock()
 	s.items[key] = Item{
 		Content:    content,
-		Expiration: time.Now().Add(duration).UnixNano(),
+		Expiration: utils.Now().Add(duration).UnixNano(),
 	}
 }

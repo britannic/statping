@@ -1,37 +1,31 @@
-// Statup
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statup
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package notifiers
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/britannic/statping/core/notifier"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/statping/statping/types/failures"
+	"github.com/statping/statping/types/notifications"
+	"github.com/statping/statping/types/notifier"
+	"github.com/statping/statping/types/services"
+	"github.com/statping/statping/utils"
 )
 
+var _ notifier.Notifier = (*telegram)(nil)
+
 type telegram struct {
-	*notifier.Notification
+	*notifications.Notification
 }
 
-var Telegram = &telegram{&notifier.Notification{
+func (t *telegram) Select() *notifications.Notification {
+	return t.Notification
+}
+
+var Telegram = &telegram{&notifications.Notification{
 	Method:      "telegram",
 	Title:       "Telegram",
 	Description: "Receive notifications on your Telegram channel when a service has an issue. You must get a Telegram API token from the /botfather. Review the <a target=\"_blank\" href=\"http://techthoughts.info/how-to-create-a-telegram-bot-and-send-messages-via-api\">Telegram API Tutorial</a> to learn how to generate a new API Token.",
@@ -39,7 +33,8 @@ var Telegram = &telegram{&notifier.Notification{
 	AuthorUrl:   "https://github.com/hunterlong",
 	Icon:        "fab fa-telegram-plane",
 	Delay:       time.Duration(5 * time.Second),
-	Form: []notifier.NotificationForm{{
+	Limits:      60,
+	Form: []notifications.NotificationForm{{
 		Type:        "text",
 		Title:       "Telegram API Token",
 		Placeholder: "383810182:EEx829dtCeufeQYXG7CUdiQopqdmmxBPO7-s",
@@ -48,72 +43,53 @@ var Telegram = &telegram{&notifier.Notification{
 		Required:    true,
 	}, {
 		Type:        "text",
-		Title:       "Channel or User ID",
-		Placeholder: "789325392",
-		SmallText:   "Insert your Telegram Channel ID or User ID here.",
-		DbField:     "Var1",
+		Title:       "Channel or User",
+		Placeholder: "@statping_channel",
+		SmallText:   "Insert your Telegram Channel or User here.",
+		DbField:     "var1",
 		Required:    true,
 	}}},
 }
 
-func (u *telegram) Select() *notifier.Notification {
-	return u.Notification
-}
-
 // Send will send a HTTP Post to the Telegram API. It accepts type: string
-func (u *telegram) Send(msg interface{}) error {
-	message := msg.(string)
-	apiEndpoint := fmt.Sprintf("https://api.telegram.org/bot%v/sendMessage", u.ApiSecret)
+func (t *telegram) sendMessage(message string) (string, error) {
+	apiEndpoint := fmt.Sprintf("https://api.telegram.org/bot%v/sendMessage", t.ApiSecret)
 
 	v := url.Values{}
-	v.Set("chat_id", u.Var1)
+	v.Set("chat_id", t.Var1)
 	v.Set("text", message)
 	rb := *strings.NewReader(v.Encode())
 
-	contents, _, err := utils.HttpRequest(apiEndpoint, "GET", "application/x-www-form-urlencoded", nil, &rb, time.Duration(10*time.Second), true)
+	contents, _, err := utils.HttpRequest(apiEndpoint, "GET", "application/x-www-form-urlencoded", nil, &rb, time.Duration(10*time.Second), true, nil)
 
 	success, _ := telegramSuccess(contents)
 	if !success {
 		errorOut := telegramError(contents)
 		out := fmt.Sprintf("Error code %v - %v", errorOut.ErrorCode, errorOut.Description)
-		return errors.New(out)
+		return string(contents), errors.New(out)
 	}
-	return err
+	return string(contents), err
 }
 
 // OnFailure will trigger failing service
-func (u *telegram) OnFailure(s *types.Service, f *types.Failure) {
+func (t *telegram) OnFailure(s *services.Service, f *failures.Failure) error {
 	msg := fmt.Sprintf("Your service '%v' is currently offline!", s.Name)
-	u.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
+	_, err := t.sendMessage(msg)
+	return err
 }
 
 // OnSuccess will trigger successful service
-func (u *telegram) OnSuccess(s *types.Service) {
-	if !s.Online || !s.SuccessNotified {
-		u.ResetUniqueQueue(fmt.Sprintf("service_%v", s.Id))
-		var msg interface{}
-		if s.UpdateNotify {
-			s.UpdateNotify = false
-		}
-		msg = s.DownText
-
-		u.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
-	}
-}
-
-// OnSave triggers when this notifier has been saved
-func (u *telegram) OnSave() error {
-	utils.Log(1, fmt.Sprintf("Notification %v is receiving updated information.", u.Method))
-
-	// Do updating stuff here
-
-	return nil
+func (t *telegram) OnSuccess(s *services.Service) error {
+	msg := fmt.Sprintf("Your service '%v' is currently online!", s.Name)
+	_, err := t.sendMessage(msg)
+	return err
 }
 
 // OnTest will test the Twilio SMS messaging
-func (u *telegram) OnTest() error {
+func (t *telegram) OnTest() (string, error) {
 	msg := fmt.Sprintf("Testing the Twilio SMS Notifier on your Statping server")
-	return u.Send(msg)
+	content, err := t.sendMessage(msg)
+	return content, err
 }
 
 func telegramSuccess(res []byte) (bool, telegramResponse) {

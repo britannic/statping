@@ -1,120 +1,187 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package main
 
 import (
-	"flag"
 	"fmt"
-	"github.com/britannic/statping/core"
-	"github.com/britannic/statping/handlers"
-	"github.com/britannic/statping/plugin"
-	"github.com/britannic/statping/source"
-	"github.com/britannic/statping/utils"
-	"github.com/joho/godotenv"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/pkg/errors"
+	"github.com/statping/statping/database"
+	"github.com/statping/statping/handlers"
+	"github.com/statping/statping/notifiers"
+	"github.com/statping/statping/source"
+	"github.com/statping/statping/types/configs"
+	"github.com/statping/statping/types/core"
+	"github.com/statping/statping/types/services"
+	"github.com/statping/statping/utils"
 )
 
 var (
 	// VERSION stores the current version of Statping
 	VERSION string
 	// COMMIT stores the git commit hash for this version of Statping
-	COMMIT      string
-	ipAddress   string
-	UsingDotEnv bool
-	port        int
+	COMMIT string
+	log    = utils.Log.WithField("type", "cmd")
+	confgs *configs.DbConfig
 )
 
 func init() {
-	core.VERSION = VERSION
+	core.New(VERSION)
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(assetsCmd)
+	rootCmd.AddCommand(exportCmd)
+	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(sassCmd)
+	rootCmd.AddCommand(onceCmd)
+	rootCmd.AddCommand(envCmd)
+	rootCmd.AddCommand(resetCmd)
+	utils.InitCLI()
+	parseFlags(rootCmd)
 }
 
-// parseFlags will parse the application flags
-// -ip = 0.0.0.0 IP address for outgoing HTTP server
-// -port = 8080 Port number for outgoing HTTP server
-func parseFlags() {
-	ip := flag.String("ip", "0.0.0.0", "IP address to run the Statping HTTP server")
-	p := flag.Int("port", 8080, "Port to run the HTTP server")
-	flag.Parse()
-	ipAddress = *ip
-	port = *p
-	if os.Getenv("PORT") != "" {
-		port = int(utils.ToInt(os.Getenv("PORT")))
-	}
-	if os.Getenv("IP") != "" {
-		ipAddress = os.Getenv("IP")
-	}
+// exit will return an error and return an exit code 1 due to this error
+func exit(err error) {
+	utils.SentryErr(err)
+	Close()
+	log.Fatalln(err)
+}
+
+// Close will gracefully stop the database connection, and log file
+func Close() {
+	utils.CloseLogs()
+	confgs.Close()
+	fmt.Println("Shutting down Statping")
 }
 
 // main will run the Statping application
 func main() {
-	var err error
-	parseFlags()
-	loadDotEnvs()
-	source.Assets()
-	if err := utils.InitLogs(); err != nil {
-		fmt.Printf("Statping Log Error: \n %v\n", err)
-		os.Exit(2)
-	}
-	args := flag.Args()
-
-	if len(args) >= 1 {
-		err := catchCLI(args)
-		if err != nil {
-			if err.Error() == "end" {
-				os.Exit(0)
-			}
-			fmt.Println(err)
-			os.Exit(1)
-		}
-	}
-	utils.Log(1, fmt.Sprintf("Starting Statping v%v", VERSION))
-
-	core.Configs, err = core.LoadConfigFile(utils.Directory)
-	if err != nil {
-		utils.Log(3, err)
-		core.SetupMode = true
-		utils.Log(1, handlers.RunHTTPServer(ipAddress, port))
-		os.Exit(1)
-	}
-	mainProcess()
+	Execute()
 }
 
-// loadDotEnvs attempts to load database configs from a '.env' file in root directory
-func loadDotEnvs() error {
-	err := godotenv.Load()
-	if err == nil {
-		utils.Log(1, "Environment file '.env' Loaded")
-		UsingDotEnv = true
+// main will run the Statping application
+func start() {
+	var err error
+	go sigterm()
+
+	if err := source.Assets(); err != nil {
+		exit(err)
 	}
-	return err
+
+	utils.VerboseMode = verboseMode
+
+	if err := utils.InitLogs(); err != nil {
+		log.Errorf("Statping Log Error: %v\n", err)
+	}
+
+	log.Info(fmt.Sprintf("Starting Statping v%s", VERSION))
+
+	//if err := updateDisplay(); err != nil {
+	//	log.Warnln(err)
+	//}
+
+	confgs, err = configs.LoadConfigs(configFile)
+	if err != nil {
+		log.Infoln("Starting in Setup Mode")
+		if err := SetupMode(); err != nil {
+			exit(err)
+		}
+	}
+
+	if err = configs.ConnectConfigs(confgs, true); err != nil {
+		exit(err)
+	}
+
+	if !confgs.Db.HasTable("core") {
+		var srvs int64
+		if confgs.Db.HasTable(&services.Service{}) {
+			confgs.Db.Model(&services.Service{}).Count(&srvs)
+			if srvs > 0 {
+				exit(errors.Wrap(err, "there are already services setup."))
+				return
+			}
+		}
+
+		if err := confgs.DropDatabase(); err != nil {
+			exit(errors.Wrap(err, "error dropping database"))
+		}
+
+		if err := confgs.CreateDatabase(); err != nil {
+			exit(errors.Wrap(err, "error creating database"))
+		}
+
+		if err := configs.CreateAdminUser(confgs); err != nil {
+			exit(errors.Wrap(err, "error creating default admin user"))
+		}
+
+		if utils.Params.GetBool("SAMPLE_DATA") {
+			if err := configs.TriggerSamples(); err != nil {
+				exit(errors.Wrap(err, "error creating database"))
+			}
+		} else {
+			if err := core.Samples(); err != nil {
+				exit(errors.Wrap(err, "error added core details"))
+			}
+		}
+
+	}
+
+	if err = confgs.DatabaseChanges(); err != nil {
+		exit(err)
+	}
+
+	if err := confgs.MigrateDatabase(); err != nil {
+		exit(err)
+	}
+
+	if err := mainProcess(); err != nil {
+		exit(err)
+	}
+}
+
+func SetupMode() error {
+	return handlers.RunHTTPServer(ipAddress, port)
+}
+
+// sigterm will attempt to close the database connections gracefully
+func sigterm() {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+	Close()
+	os.Exit(0)
 }
 
 // mainProcess will initialize the Statping application and run the HTTP server
-func mainProcess() {
-	dir := utils.Directory
-	var err error
-	err = core.Configs.Connect(false, dir)
-	if err != nil {
-		utils.Log(4, fmt.Sprintf("could not connect to database: %v", err))
+func mainProcess() error {
+	if err := InitApp(); err != nil {
+		return err
 	}
-	core.Configs.MigrateDatabase()
-	core.InitApp()
-	if !core.SetupMode {
-		plugin.LoadPlugins()
-		fmt.Println(handlers.RunHTTPServer(ipAddress, port))
-		os.Exit(1)
+
+	services.LoadServicesYaml()
+
+	if err := handlers.RunHTTPServer(ipAddress, port); err != nil {
+		log.Fatalln(err)
+		return errors.Wrap(err, "http server")
 	}
+	return nil
+}
+
+// InitApp will start the Statping instance with a valid database connection
+// This function will gather all services in database, add/init Notifiers,
+// and start the database cleanup routine
+func InitApp() error {
+	if _, err := core.Select(); err != nil {
+		return err
+	}
+	if _, err := services.SelectAllServices(true); err != nil {
+		return err
+	}
+	go services.CheckServices()
+	notifiers.InitNotifiers()
+	go database.Maintenance()
+	utils.SentryInit(&VERSION, core.App.AllowReports.Bool)
+	core.App.Setup = true
+	core.App.Started = utils.Now()
+	return nil
 }

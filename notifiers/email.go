@@ -1,31 +1,20 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package notifiers
 
 import (
-	"bytes"
 	"crypto/tls"
 	"fmt"
-	"github.com/go-mail/mail"
-	"github.com/britannic/statping/core/notifier"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
-	"html/template"
 	"time"
+
+	"github.com/go-mail/mail"
+	"github.com/statping/statping/types/failures"
+	"github.com/statping/statping/types/notifications"
+	"github.com/statping/statping/types/notifier"
+	"github.com/statping/statping/types/null"
+	"github.com/statping/statping/types/services"
+	"github.com/statping/statping/utils"
 )
+
+var _ notifier.Notifier = (*emailer)(nil)
 
 const (
 	mainEmailTemplate = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -71,23 +60,23 @@ const (
                                 <tr>
                                     <td class="content-cell" style="box-sizing: border-box; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; padding: 35px; word-break: break-word;">
                                         <h1 style="box-sizing: border-box; color: #2F3133; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size: 19px; font-weight: bold; margin-top: 0;" align="left">
-{{ .Name }} is {{ if .Online }}Online{{else}}Offline{{end}}!
+{{ .Service.Name }} is {{ if .Service.Online }}Online{{else}}Offline{{end}}!
 </h1>
                                         <p style="box-sizing: border-box; color: #74787E; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size: 16px; line-height: 1.5em; margin-top: 0;" align="left">
 
-{{ if .Online }}
-Your Statping service <a target="_blank" href="{{.Domain}}">{{.Name}}</a> is back online. This service has been triggered with a HTTP status code of '{{.LastStatusCode}}' and is currently online based on your requirements. Your service was reported online at {{.CreatedAt}}. </p>
+{{ if .Service.Online }}
+Your Statping service <a target="_blank" href="{{.Service.Domain}}">{{.Service.Name}}</a> is back online. This service has been triggered with a HTTP status code of '{{.Service.LastStatusCode}}' and is currently online based on your requirements. Your service was reported online at {{.Service.CreatedAt}}. </p>
 {{ else }}
-Your Statping service <a target="_blank" href="{{.Domain}}">{{.Name}}</a> has been triggered with a HTTP status code of '{{.LastStatusCode}}' and is currently offline based on your requirements. This failure was created on {{.CreatedAt}}. </p>
+Your Statping service <a target="_blank" href="{{.Service.Domain}}">{{.Service.Name}}</a> has been triggered with a HTTP status code of '{{.Service.LastStatusCode}}' and is currently offline based on your requirements. This failure was created on {{.Service.CreatedAt}}. </p>
 {{ end }}
 
-{{if .LastResponse }}
+{{if .Service.LastResponse }}
                                         <h1 style="box-sizing: border-box; color: #2F3133; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size: 19px; font-weight: bold; margin-top: 0;" align="left">
 Last Response</h1>
                                         <p style="box-sizing: border-box; color: #74787E; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size: 16px; line-height: 1.5em; margin-top: 0;" align="left">
-{{ .LastResponse }} </p> {{end}}
+{{ .Service.LastResponse }} </p> {{end}}
                                         <table class="body-sub" style="border-top-color: #EDEFF2; border-top-style: solid; border-top-width: 1px; box-sizing: border-box; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; margin-top: 25px; padding-top: 25px;">
-                                            <td style="box-sizing: border-box; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; word-break: break-word;"> <a href="/service/{{.Id}}" class="button button--blue" target="_blank" style="-webkit-text-size-adjust: none; background: #3869D4; border-color: #3869d4; border-radius: 3px; border-style: solid; border-width: 10px 18px; box-shadow: 0 2px 3px rgba(0, 0, 0, 0.16); box-sizing: border-box; color: #FFF; display: inline-block; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; text-decoration: none;">View Service</a> </td>
+                                            <td style="box-sizing: border-box; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; word-break: break-word;"> <a href="/service/{{.Service.Id}}" class="button button--blue" target="_blank" style="-webkit-text-size-adjust: none; background: #3869D4; border-color: #3869d4; border-radius: 3px; border-style: solid; border-width: 10px 18px; box-shadow: 0 2px 3px rgba(0, 0, 0, 0.16); box-sizing: border-box; color: #FFF; display: inline-block; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; text-decoration: none;">View Service</a> </td>
                                             <td style="box-sizing: border-box; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; word-break: break-word;"> <a href="/dashboard" class="button button--blue" target="_blank" style="-webkit-text-size-adjust: none; background: #3869D4; border-color: #3869d4; border-radius: 3px; border-style: solid; border-width: 10px 18px; box-shadow: 0 2px 3px rgba(0, 0, 0, 0.16); box-sizing: border-box; color: #FFF; display: inline-block; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; text-decoration: none;">Statping Dashboard</a> </td>
                                         </table>
                                     </td>
@@ -107,18 +96,23 @@ var (
 	mailer *mail.Dialer
 )
 
-type email struct {
-	*notifier.Notification
+type emailer struct {
+	*notifications.Notification
 }
 
-var Emailer = &email{&notifier.Notification{
+func (e *emailer) Select() *notifications.Notification {
+	return e.Notification
+}
+
+var email = &emailer{&notifications.Notification{
 	Method:      "email",
 	Title:       "email",
 	Description: "Send emails via SMTP when services are online or offline.",
 	Author:      "Hunter Long",
 	AuthorUrl:   "https://github.com/hunterlong",
 	Icon:        "far fa-envelope",
-	Form: []notifier.NotificationForm{{
+	Limits:      30,
+	Form: []notifications.NotificationForm{{
 		Type:        "text",
 		Title:       "SMTP Host",
 		Placeholder: "Insert your SMTP Host here.",
@@ -154,17 +148,7 @@ var Emailer = &email{&notifier.Notification{
 		Placeholder: "",
 		SmallText:   "To Disable TLS/SSL insert 'true'",
 		DbField:     "api_key",
-	}},
-}}
-
-// Send will send the SMTP email with your authentication It accepts type: *emailOutgoing
-func (u *email) Send(msg interface{}) error {
-	email := msg.(*emailOutgoing)
-	err := u.dialSend(email)
-	if err != nil {
-		return err
-	}
-	return nil
+	}}},
 }
 
 type emailOutgoing struct {
@@ -172,58 +156,46 @@ type emailOutgoing struct {
 	Subject  string
 	Template string
 	From     string
-	Data     interface{}
+	Data     replacer
 	Source   string
 	Sent     bool
 }
 
 // OnFailure will trigger failing service
-func (u *email) OnFailure(s *types.Service, f *types.Failure) {
+func (e *emailer) OnFailure(s *services.Service, f *failures.Failure) error {
+	subject := fmt.Sprintf("Service %s is Offline", s.Name)
 	email := &emailOutgoing{
-		To:       u.Var2,
-		Subject:  fmt.Sprintf("Service %v is Failing", s.Name),
+		To:       e.Var2,
+		Subject:  subject,
 		Template: mainEmailTemplate,
-		Data:     interface{}(s),
-		From:     u.Var1,
+		Data: replacer{
+			Service: s,
+			Failure: f,
+		},
+		From: e.Var1,
 	}
-	u.AddQueue(fmt.Sprintf("service_%v", s.Id), email)
+	return e.dialSend(email)
 }
 
 // OnSuccess will trigger successful service
-func (u *email) OnSuccess(s *types.Service) {
-	if !s.Online || !s.SuccessNotified {
-		var msg string
-		if s.UpdateNotify {
-			s.UpdateNotify = false
-		}
-		msg = s.DownText
-
-		u.ResetUniqueQueue(fmt.Sprintf("service_%v", s.Id))
-		email := &emailOutgoing{
-			To:       u.Var2,
-			Subject:  msg,
-			Template: mainEmailTemplate,
-			Data:     interface{}(s),
-			From:     u.Var1,
-		}
-		u.AddQueue(fmt.Sprintf("service_%v", s.Id), email)
+func (e *emailer) OnSuccess(s *services.Service) error {
+	subject := fmt.Sprintf("Service %s is Back Online", s.Name)
+	email := &emailOutgoing{
+		To:       e.Var2,
+		Subject:  subject,
+		Template: mainEmailTemplate,
+		Data: replacer{
+			Service: s,
+			Failure: &failures.Failure{},
+		},
+		From: e.Var1,
 	}
-}
-
-func (u *email) Select() *notifier.Notification {
-	return u.Notification
-}
-
-// OnSave triggers when this notifier has been saved
-func (u *email) OnSave() error {
-	utils.Log(1, fmt.Sprintf("Notification %v is receiving updated information.", u.Method))
-	// Do updating stuff here
-	return nil
+	return e.dialSend(email)
 }
 
 // OnTest triggers when this notifier has been saved
-func (u *email) OnTest() error {
-	testService := &types.Service{
+func (e *emailer) OnTest() (string, error) {
+	testService := services.Service{
 		Id:             1,
 		Name:           "Example Service",
 		Domain:         "https://www.jw.org/en/bible-teachings/online-lessons/",
@@ -233,26 +205,30 @@ func (u *email) OnTest() error {
 		Method:         "GET",
 		Timeout:        20,
 		LastStatusCode: 200,
-		Expected:       types.NewNullString("test example"),
+		Expected:       null.NewNullString("test example"),
 		LastResponse:   "<html>this is an example response</html>",
-		CreatedAt:      time.Now().Add(-24 * time.Hour),
+		CreatedAt:      utils.Now().Add(-24 * time.Hour),
 	}
+	subject := fmt.Sprintf("Service %v is Back Online", testService.Name)
 	email := &emailOutgoing{
-		To:       u.Var2,
-		Subject:  fmt.Sprintf("Service %v is Back Online", testService.Name),
+		To:       e.Var2,
+		Subject:  subject,
 		Template: mainEmailTemplate,
-		Data:     testService,
-		From:     u.Var1,
+		Data: replacer{
+			Service: &testService,
+			Failure: &failures.Failure{},
+		},
+		From: e.Var1,
 	}
-	return u.dialSend(email)
+	err := e.dialSend(email)
+	return subject, err
 }
 
-func (u *email) dialSend(email *emailOutgoing) error {
-	mailer = mail.NewDialer(Emailer.Host, Emailer.Port, Emailer.Username, Emailer.Password)
-	emailSource(email)
+func (e *emailer) dialSend(email *emailOutgoing) error {
+	mailer = mail.NewDialer(e.Host, e.Port, e.Username, e.Password)
 	m := mail.NewMessage()
 	// if email setting TLS is Disabled
-	if u.ApiKey == "true" {
+	if e.ApiKey == "true" {
 		mailer.SSL = false
 	} else {
 		mailer.TLSConfig = &tls.Config{InsecureSkipVerify: true}
@@ -260,29 +236,11 @@ func (u *email) dialSend(email *emailOutgoing) error {
 	m.SetHeader("From", email.From)
 	m.SetHeader("To", email.To)
 	m.SetHeader("Subject", email.Subject)
-	m.SetBody("text/html", email.Source)
+	m.SetBody("text/html", ReplaceTemplate(email.Template, email.Data))
+
 	if err := mailer.DialAndSend(m); err != nil {
-		utils.Log(3, fmt.Sprintf("email '%v' sent to: %v (size: %v) %v", email.Subject, email.To, len([]byte(email.Source)), err))
+		utils.Log.Errorln(fmt.Sprintf("email '%v' sent to: %v (size: %v) %v", email.Subject, email.To, len([]byte(email.Source)), err))
 		return err
 	}
 	return nil
-}
-
-func emailSource(email *emailOutgoing) {
-	source := emailTemplate(email.Template, email.Data)
-	email.Source = source
-}
-
-func emailTemplate(contents string, data interface{}) string {
-	t := template.New("email")
-	t, err := t.Parse(contents)
-	if err != nil {
-		utils.Log(3, err)
-	}
-	var tpl bytes.Buffer
-	if err := t.Execute(&tpl, data); err != nil {
-		utils.Log(2, err)
-	}
-	result := tpl.String()
-	return result
 }

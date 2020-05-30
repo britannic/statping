@@ -1,46 +1,41 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package notifiers
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/britannic/statping/core/notifier"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
 	"time"
+
+	"github.com/statping/statping/types/failures"
+	"github.com/statping/statping/types/notifications"
+	"github.com/statping/statping/types/notifier"
+	"github.com/statping/statping/types/services"
+	"github.com/statping/statping/utils"
 )
+
+var _ notifier.Notifier = (*mobilePush)(nil)
 
 const mobileIdentifier = "com.statping"
 
 type mobilePush struct {
-	*notifier.Notification
+	*notifications.Notification
 }
 
-var Mobile = &mobilePush{&notifier.Notification{
-	Method: "Mobile",
-	Title:  "Mobile Notifications",
+func (m *mobilePush) Select() *notifications.Notification {
+	return m.Notification
+}
+
+var Mobile = &mobilePush{&notifications.Notification{
+	Method: "mobile",
+	Title:  "Mobile",
 	Description: `Receive push notifications on your Mobile device using the Statping App. You can scan the Authentication QR Code found in Settings to get the Mobile app setup in seconds.
 				 <p align="center"><a href="https://play.google.com/store/apps/details?id=com.statping"><img src="https://img.cjx.io/google-play.svg"></a><a href="https://itunes.apple.com/us/app/apple-store/id1445513219"><img src="https://img.cjx.io/app-store-badge.svg"></a></p>`,
 	Author:    "Hunter Long",
 	AuthorUrl: "https://github.com/hunterlong",
 	Delay:     time.Duration(5 * time.Second),
-	Icon:      "fas fa-Mobile-alt",
-	Form: []notifier.NotificationForm{{
+	Icon:      "fas fa-mobile-alt",
+	Limits:    30,
+	Form: []notifications.NotificationForm{{
 		Type:        "text",
 		Title:       "Device Identifiers",
 		Placeholder: "A list of your Mobile device push notification ID's.",
@@ -55,11 +50,7 @@ var Mobile = &mobilePush{&notifier.Notification{
 	}}},
 }
 
-func (u *mobilePush) Select() *notifier.Notification {
-	return u.Notification
-}
-
-func dataJson(s *types.Service, f *types.Failure) map[string]interface{} {
+func dataJson(s *services.Service, f *failures.Failure) map[string]interface{} {
 	serviceId := "0"
 	if s != nil {
 		serviceId = utils.ToString(s.Id)
@@ -83,7 +74,7 @@ func dataJson(s *types.Service, f *types.Failure) map[string]interface{} {
 }
 
 // OnFailure will trigger failing service
-func (u *mobilePush) OnFailure(s *types.Service, f *types.Failure) {
+func (m *mobilePush) OnFailure(s *services.Service, f *failures.Failure) error {
 	data := dataJson(s, f)
 	msg := &pushArray{
 		Message: fmt.Sprintf("Your service '%v' is currently failing! Reason: %v", s.Name, f.Issue),
@@ -91,73 +82,51 @@ func (u *mobilePush) OnFailure(s *types.Service, f *types.Failure) {
 		Topic:   mobileIdentifier,
 		Data:    data,
 	}
-	u.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
+	return m.Send(msg)
 }
 
 // OnSuccess will trigger successful service
-func (u *mobilePush) OnSuccess(s *types.Service) {
+func (m *mobilePush) OnSuccess(s *services.Service) error {
 	data := dataJson(s, nil)
-	if !s.Online || !s.SuccessNotified {
-		var msgStr string
-		if s.UpdateNotify {
-			s.UpdateNotify = false
-		}
-		msgStr = s.DownText
-
-		u.ResetUniqueQueue(fmt.Sprintf("service_%v", s.Id))
-		msg := &pushArray{
-			Message: msgStr,
-			Title:   "Service Online",
-			Topic:   mobileIdentifier,
-			Data:    data,
-		}
-		u.AddQueue(fmt.Sprintf("service_%v", s.Id), msg)
-	}
-}
-
-// OnSave triggers when this notifier has been saved
-func (u *mobilePush) OnSave() error {
 	msg := &pushArray{
-		Message: "The Mobile Notifier has been saved",
-		Title:   "Notification Saved",
+		Message: "Service is Online!",
+		Title:   "Service Online",
 		Topic:   mobileIdentifier,
+		Data:    data,
 	}
-	u.AddQueue("saved", msg)
-	return nil
+	return m.Send(msg)
 }
 
 // OnTest triggers when this notifier has been saved
-func (u *mobilePush) OnTest() error {
+func (m *mobilePush) OnTest() (string, error) {
 	msg := &pushArray{
 		Message:  "Testing the Mobile Notifier",
 		Title:    "Testing Notifications",
 		Topic:    mobileIdentifier,
-		Tokens:   []string{u.Var1},
-		Platform: utils.ToInt(u.Var2),
+		Tokens:   []string{m.Var1},
+		Platform: utils.ToInt(m.Var2),
 	}
 	body, err := pushRequest(msg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var output mobileResponse
 	err = json.Unmarshal(body, &output)
 	if err != nil {
-		return err
+		return string(body), err
 	}
 	if len(output.Logs) == 0 {
-		return nil
+		return string(body), err
 	} else {
 		firstLog := output.Logs[0].Error
-		return fmt.Errorf("Mobile Notification error: %v", firstLog)
+		return string(body), fmt.Errorf("Mobile Notification error: %v", firstLog)
 	}
-	return err
 }
 
 // Send will send message to Statping push notifications endpoint
-func (u *mobilePush) Send(msg interface{}) error {
-	pushMessage := msg.(*pushArray)
-	pushMessage.Tokens = []string{u.Var1}
-	pushMessage.Platform = utils.ToInt(u.Var2)
+func (m *mobilePush) Send(pushMessage *pushArray) error {
+	pushMessage.Tokens = []string{m.Var1}
+	pushMessage.Platform = utils.ToInt(m.Var2)
 	_, err := pushRequest(pushMessage)
 	if err != nil {
 		return err
@@ -174,7 +143,7 @@ func pushRequest(msg *pushArray) ([]byte, error) {
 		return nil, err
 	}
 	url := "https://push.statping.com/api/push"
-	body, _, err = utils.HttpRequest(url, "POST", "application/json", nil, bytes.NewBuffer(body), time.Duration(20*time.Second), true)
+	body, _, err = utils.HttpRequest(url, "POST", "application/json", nil, bytes.NewBuffer(body), time.Duration(20*time.Second), true, nil)
 	return body, err
 }
 

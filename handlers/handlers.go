@@ -1,34 +1,20 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package handlers
 
 import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/sessions"
-	"github.com/britannic/statping/core"
-	"github.com/britannic/statping/source"
-	"github.com/britannic/statping/types"
-	"github.com/britannic/statping/utils"
 	"html/template"
 	"net/http"
-	"os"
-	"strings"
+	"path"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/prometheus/common/log"
+	"github.com/statping/statping/types/errors"
+
+	"github.com/statping/statping/source"
+	"github.com/statping/statping/utils"
 )
 
 const (
@@ -37,13 +23,11 @@ const (
 )
 
 var (
-	sessionStore *sessions.CookieStore
-	httpServer   *http.Server
-	usingSSL     bool
-	mainTmpl     = `{{define "main" }} {{ template "base" . }} {{ end }}`
-	templates    = []string{"base.gohtml", "head.gohtml", "nav.gohtml", "footer.gohtml", "scripts.gohtml", "form_service.gohtml", "form_notifier.gohtml", "form_group.gohtml", "form_user.gohtml", "form_checkin.gohtml", "form_message.gohtml"}
-	javascripts  = []string{"charts.js", "chart_index.js"}
-	mainTemplate *template.Template
+	jwtKey     string
+	httpServer *http.Server
+	usingSSL   bool
+	mainTmpl   = `{{define "main" }} {{ template "base" . }} {{ end }}`
+	templates  = []string{"base.gohtml"}
 )
 
 // RunHTTPServer will start a HTTP server on a specific IP and port
@@ -54,11 +38,11 @@ func RunHTTPServer(ip string, port int) error {
 	cert := utils.FileExists(utils.Directory + "/server.crt")
 
 	if key && cert {
-		utils.Log(1, "server.cert and server.key was found in root directory! Starting in SSL mode.")
-		utils.Log(1, fmt.Sprintf("Statping Secure HTTPS Server running on https://%v:%v", ip, 443))
+		log.Infoln("server.cert and server.key was found in root directory! Starting in SSL mode.")
+		log.Infoln(fmt.Sprintf("Statping Secure HTTPS Server running on https://%v:%v", ip, 443))
 		usingSSL = true
 	} else {
-		utils.Log(1, "Statping HTTP Server running on http://"+host)
+		log.Infoln("Statping HTTP Server running on http://" + host + basePath)
 	}
 
 	router = Router()
@@ -97,24 +81,18 @@ func RunHTTPServer(ip string, port int) error {
 		httpServer.SetKeepAlivesEnabled(false)
 		return httpServer.ListenAndServe()
 	}
-	return nil
 }
 
 // IsReadAuthenticated will allow Read Only authentication for some routes
 func IsReadAuthenticated(r *http.Request) bool {
-	var token string
-	query := r.URL.Query()
-	key := query.Get("api")
-	if key == core.CoreApp.ApiKey {
+	if ok := hasSetupEnv(); ok {
 		return true
 	}
-	tokens, ok := r.Header["Authorization"]
-	if ok && len(tokens) >= 1 {
-		token = tokens[0]
-		token = strings.TrimPrefix(token, "Bearer ")
-		if token == core.CoreApp.ApiKey {
-			return true
-		}
+	if ok := hasAPIQuery(r); ok {
+		return true
+	}
+	if ok := hasAuthorizationHeader(r); ok {
+		return true
 	}
 	return IsFullAuthenticated(r)
 }
@@ -122,138 +100,147 @@ func IsReadAuthenticated(r *http.Request) bool {
 // IsFullAuthenticated returns true if the HTTP request is authenticated. You can set the environment variable GO_ENV=test
 // to bypass the admin authenticate to the dashboard features.
 func IsFullAuthenticated(r *http.Request) bool {
-	if os.Getenv("GO_ENV") == "test" {
+	if ok := hasSetupEnv(); ok {
 		return true
 	}
-	if core.CoreApp == nil {
+	if ok := hasAPIQuery(r); ok {
 		return true
 	}
-	if sessionStore == nil {
+	if ok := hasAuthorizationHeader(r); ok {
 		return true
-	}
-	var token string
-	tokens, ok := r.Header["Authorization"]
-	if ok && len(tokens) >= 1 {
-		token = tokens[0]
-		token = strings.TrimPrefix(token, "Bearer ")
-		if token == core.CoreApp.ApiSecret {
-			return true
-		}
 	}
 	return IsAdmin(r)
 }
 
+func getJwtToken(r *http.Request) (JwtClaim, error) {
+	c, err := r.Cookie(cookieKey)
+	if err != nil {
+		if err == http.ErrNoCookie {
+			return JwtClaim{}, err
+		}
+		return JwtClaim{}, err
+	}
+	tknStr := c.Value
+	var claims JwtClaim
+	tkn, err := jwt.ParseWithClaims(tknStr, &claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(jwtKey), nil
+	})
+	if err != nil {
+		if err == jwt.ErrSignatureInvalid {
+			return JwtClaim{}, err
+		}
+		return JwtClaim{}, err
+	}
+	if !tkn.Valid {
+		return claims, errors.New("token is not valid")
+	}
+	return claims, err
+}
+
+// ScopeName will show private JSON fields in the API.
+// It will return "admin" if request has valid admin authentication.
+func ScopeName(r *http.Request) string {
+	if ok := hasAPIQuery(r); ok {
+		return "admin"
+	}
+	if ok := hasAuthorizationHeader(r); ok {
+		return "admin"
+	}
+	claim, err := getJwtToken(r)
+	if err != nil {
+		return ""
+	}
+	if claim.Admin {
+		return "admin"
+	}
+	return "user"
+}
+
 // IsAdmin returns true if the user session is an administrator
 func IsAdmin(r *http.Request) bool {
-	session, err := sessionStore.Get(r, cookieKey)
+	claim, err := getJwtToken(r)
 	if err != nil {
 		return false
 	}
-	if session.Values["admin"] == nil {
-		return false
-	}
-	return session.Values["admin"].(bool)
+	return claim.Admin
 }
 
 // IsUser returns true if the user is registered
 func IsUser(r *http.Request) bool {
-	if os.Getenv("GO_ENV") == "test" {
+	if ok := hasSetupEnv(); ok {
 		return true
 	}
-	session, err := sessionStore.Get(r, cookieKey)
+	tk, err := getJwtToken(r)
 	if err != nil {
 		return false
 	}
-	if session.Values["authenticated"] == nil {
+	if err := tk.Valid(); err != nil {
 		return false
 	}
-	return session.Values["authenticated"].(bool)
+	return true
 }
 
-func loadTemplate(w http.ResponseWriter, r *http.Request) error {
+func loadTemplate(w http.ResponseWriter, r *http.Request) (*template.Template, error) {
 	var err error
-	mainTemplate = template.New("main")
-	mainTemplate.Funcs(handlerFuncs(w, r))
+	mainTemplate := template.New("main")
 	mainTemplate, err = mainTemplate.Parse(mainTmpl)
 	if err != nil {
-		utils.Log(4, err)
-		return err
+		log.Errorln(err)
+		return nil, err
 	}
-	// render all templates
 	mainTemplate.Funcs(handlerFuncs(w, r))
+	// render all templates
 	for _, temp := range templates {
 		tmp, _ := source.TmplBox.String(temp)
 		mainTemplate, err = mainTemplate.Parse(tmp)
 		if err != nil {
-			utils.Log(4, err)
-			return err
+			log.Errorln(err)
+			return nil, err
 		}
 	}
-	// render all javascript files
-	for _, temp := range javascripts {
-		tmp, _ := source.JsBox.String(temp)
-		mainTemplate, err = mainTemplate.Parse(tmp)
-		if err != nil {
-			utils.Log(4, err)
-			return err
-		}
-	}
-	return err
+	return mainTemplate, err
 }
 
 // ExecuteResponse will render a HTTP response for the front end user
 func ExecuteResponse(w http.ResponseWriter, r *http.Request, file string, data interface{}, redirect interface{}) {
-	utils.Http(r)
 	if url, ok := redirect.(string); ok {
-		http.Redirect(w, r, url, http.StatusSeeOther)
+		http.Redirect(w, r, path.Join(basePath, url), http.StatusSeeOther)
 		return
 	}
 	if usingSSL {
 		w.Header().Add("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 	}
-	loadTemplate(w, r)
+	mainTemplate, err := loadTemplate(w, r)
+	if err != nil {
+		log.Errorln(err)
+	}
 	render, err := source.TmplBox.String(file)
 	if err != nil {
-		utils.Log(4, err)
+		log.Errorln(err)
 	}
 	// render the page requested
 	if _, err := mainTemplate.Parse(render); err != nil {
-		utils.Log(4, err)
+		log.Errorln(err)
 	}
 	// execute the template
 	if err := mainTemplate.Execute(w, data); err != nil {
-		utils.Log(4, err)
-	}
-}
-
-// executeJSResponse will render a Javascript response
-func executeJSResponse(w http.ResponseWriter, r *http.Request, file string, data interface{}) {
-	render, err := source.JsBox.String(file)
-	if err != nil {
-		utils.Log(4, err)
-	}
-	if usingSSL {
-		w.Header().Add("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
-	}
-	t := template.New("charts")
-	t.Funcs(template.FuncMap{
-		"safe": func(html string) template.HTML {
-			return template.HTML(html)
-		},
-		"Services": func() []types.ServiceInterface {
-			return core.CoreApp.Services
-		},
-	})
-	if _, err := t.Parse(render); err != nil {
-		utils.Log(4, err)
-	}
-	if err := t.Execute(w, data); err != nil {
-		utils.Log(4, err)
+		log.Errorln(err)
 	}
 }
 
 func returnJson(d interface{}, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if e, ok := d.(errors.Error); ok {
+		w.WriteHeader(e.Status())
+		json.NewEncoder(w).Encode(e)
+		return
+	}
+	if e, ok := d.(error); ok {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(errors.New(e.Error()))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(d)
 }
 
@@ -263,5 +250,5 @@ func error404Handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 	}
 	w.WriteHeader(http.StatusNotFound)
-	ExecuteResponse(w, r, "error_404.gohtml", nil, nil)
+	ExecuteResponse(w, r, "base.gohtml", nil, nil)
 }

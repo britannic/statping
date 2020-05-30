@@ -1,29 +1,8 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package utils
 
 import (
 	"fmt"
 	"time"
-)
-
-const (
-	FlatpickrTime     = "2006-01-02 15:04"
-	FlatpickrDay      = "2006-01-02"
-	FlatpickrReadable = "Mon, 02 Jan 2006"
 )
 
 // Timezoner returns the time.Time with the user set timezone
@@ -32,6 +11,11 @@ func Timezoner(t time.Time, zone float32) time.Time {
 	loc := time.FixedZone("", int(zoneInt))
 	timez := t.In(loc)
 	return timez
+}
+
+// Now returns the UTC timestamp
+func Now() time.Time {
+	return time.Now().UTC()
 }
 
 // FormatDuration converts a time.Duration into a string

@@ -1,136 +1,205 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package utils
 
 import (
 	"fmt"
+	"github.com/fatih/structs"
+	"github.com/getsentry/sentry-go"
+	Logger "github.com/sirupsen/logrus"
+	"github.com/statping/statping/types/null"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"log"
-	"net/http"
+	"io"
 	"os"
-	"os/signal"
+	"reflect"
+	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
 var (
-	logFile   *os.File
-	fmtLogs   *log.Logger
-	ljLogger  *lumberjack.Logger
-	LastLines []*LogRow
-	LockLines sync.Mutex
+	Log          = Logger.StandardLogger()
+	ljLogger     *lumberjack.Logger
+	LastLines    []*logRow
+	LockLines    sync.Mutex
+	VerboseMode  int
+	version      string
+	allowReports bool
 )
+
+const (
+	logFilePath   = "/logs/statping.log"
+	errorReporter = "https://ddf2784201134d51a20c3440e222cebe@sentry.statping.com/4"
+)
+
+func SentryInit(v *string, allow bool) {
+	allowReports = allow
+	if v != nil {
+		if *v == "" {
+			*v = "development"
+		}
+		version = *v
+	}
+	goEnv := Params.GetString("GO_ENV")
+	allowReports := Params.GetBool("ALLOW_REPORTS")
+	if allowReports || allow || goEnv == "test" {
+		if err := sentry.Init(sentry.ClientOptions{
+			Dsn:         errorReporter,
+			Environment: goEnv,
+			Release:     version,
+		}); err != nil {
+			Log.Errorln(err)
+		}
+		Log.Infoln("Error Reporting initiated, thank you!")
+	}
+}
+
+func SentryErr(err error) {
+	if !allowReports {
+		return
+	}
+	sentry.CaptureException(err)
+}
+
+func SentryLogEntry(entry *Logger.Entry) {
+	e := sentry.NewEvent()
+	e.Message = entry.Message
+	e.Release = version
+	e.Contexts = entry.Data
+	sentry.CaptureEvent(e)
+}
+
+type hook struct {
+	Entries []Logger.Entry
+	mu      sync.RWMutex
+}
+
+func (t *hook) Fire(e *Logger.Entry) error {
+	pushLastLine(e.Message)
+	if e.Level == Logger.ErrorLevel && allowReports {
+		SentryLogEntry(e)
+	}
+	return nil
+}
+
+func (t *hook) Levels() []Logger.Level {
+	return Logger.AllLevels
+}
+
+// ToFields accepts any amount of interfaces to create a new mapping for log.Fields. You will need to
+// turn on verbose mode by starting Statping with "-v". This function will convert a struct of to the
+// base struct name, and each field into it's own mapping, for example:
+// type "*services.Service", on string field "Name" converts to "service_name=value". There is also an
+// additional field called "_pointer" that will return the pointer hex value.
+func ToFields(d ...interface{}) map[string]interface{} {
+	if !Log.IsLevelEnabled(Logger.DebugLevel) {
+		return nil
+	}
+	fieldKey := make(map[string]interface{})
+	for _, v := range d {
+		spl := strings.Split(fmt.Sprintf("%T", v), ".")
+		trueType := spl[len(spl)-1]
+		if !structs.IsStruct(v) {
+			continue
+		}
+		for _, f := range structs.Fields(v) {
+			if f.IsExported() && !f.IsZero() && f.Kind() != reflect.Ptr && f.Kind() != reflect.Slice && f.Kind() != reflect.Chan {
+				field := strings.ToLower(trueType + "_" + f.Name())
+				fieldKey[field] = replaceVal(f.Value())
+			}
+		}
+		fieldKey[strings.ToLower(trueType+"_pointer")] = fmt.Sprintf("%p", v)
+	}
+	return fieldKey
+}
+
+// replaceVal accepts an interface to be converted into human readable type
+func replaceVal(d interface{}) interface{} {
+	switch v := d.(type) {
+	case null.NullBool:
+		return v.Bool
+	case null.NullString:
+		return v.String
+	case null.NullFloat64:
+		return v.Float64
+	case null.NullInt64:
+		return v.Int64
+	case string:
+		if len(v) > 500 {
+			return v[:500] + "... (truncated in logs)"
+		}
+		return v
+	case time.Time:
+		return v.String()
+	case time.Duration:
+		return v.String()
+	default:
+		return d
+	}
+}
 
 // createLog will create the '/logs' directory based on a directory
 func createLog(dir string) error {
-	var err error
-	_, err = os.Stat(dir + "/logs")
-	if err != nil {
-		if os.IsNotExist(err) {
-			os.Mkdir(dir+"/logs", 0777)
-		} else {
-			return err
-		}
+	if !FolderExists(dir + "/logs") {
+		CreateDirectory(dir + "/logs")
 	}
-	file, err := os.Create(dir + "/logs/statup.log")
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return err
+	return nil
 }
 
 // InitLogs will create the '/logs' directory and creates a file '/logs/statup.log' for application logging
 func InitLogs() error {
-	err := createLog(Directory)
-	if err != nil {
-		return err
-	}
-	logFile, err = os.OpenFile(Directory+"/logs/statup.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0755)
-	if err != nil {
-		log.Printf("ERROR opening file: %v", err)
+	if err := createLog(Directory); err != nil {
 		return err
 	}
 	ljLogger = &lumberjack.Logger{
-		Filename:   Directory + "/logs/statup.log",
+		Filename:   Directory + logFilePath,
 		MaxSize:    16,
-		MaxBackups: 3,
+		MaxBackups: 5,
 		MaxAge:     28,
 	}
-	fmtLogs = log.New(logFile, "", log.Ldate|log.Ltime)
-	log.SetOutput(ljLogger)
-	rotate()
-	LastLines = make([]*LogRow, 0)
-	return err
+
+	mw := io.MultiWriter(os.Stdout, ljLogger)
+	Log.SetOutput(mw)
+
+	Log.SetFormatter(&Logger.TextFormatter{
+		ForceColors:   true,
+		DisableColors: false,
+	})
+	checkVerboseMode()
+
+	LastLines = make([]*logRow, 0)
+	return nil
 }
 
-func rotate() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGHUP)
-	go func() {
-		for {
-			<-c
-			ljLogger.Rotate()
-		}
-	}()
-}
-
-// Log creates a new entry in the Logger. Log has 1-5 levels depending on how critical the log/error is
-func Log(level int, err interface{}) error {
-	if disableLogs {
-		return nil
-	}
-	pushLastLine(err)
-	var outErr error
-	switch level {
-	case 5:
-		_, outErr = fmt.Printf("PANIC: %v\n", err)
-		fmtLogs.Printf("PANIC: %v\n", err)
-	case 4:
-		_, outErr = fmt.Printf("FATAL: %v\n", err)
-		fmtLogs.Printf("FATAL: %v\n", err)
-		//color.Red("ERROR: %v\n", err)
-		//os.Exit(2)
-	case 3:
-		_, outErr = fmt.Printf("ERROR: %v\n", err)
-		fmtLogs.Printf("ERROR: %v\n", err)
-		//color.Red("ERROR: %v\n", err)
-	case 2:
-		_, outErr = fmt.Printf("WARNING: %v\n", err)
-		fmtLogs.Printf("WARNING: %v\n", err)
-		//color.Yellow("WARNING: %v\n", err)
+// checkVerboseMode will reset the Logging verbose setting. You can set
+// the verbose level with "-v 3" or by setting VERBOSE=3 environment variable.
+// statping -v 1 (only Warnings)
+// statping -v 2 (Info and Warnings, default)
+// statping -v 3 (Info, Warnings and Debug)
+// statping -v 4 (Info, Warnings, Debug and Traces (SQL queries))
+func checkVerboseMode() {
+	switch VerboseMode {
 	case 1:
-		_, outErr = fmt.Printf("INFO: %v\n", err)
-		fmtLogs.Printf("INFO: %v\n", err)
-		//color.Blue("INFO: %v\n", err)
-	case 0:
-		_, outErr = fmt.Printf("%v\n", err)
-		fmtLogs.Printf("%v\n", err)
-		//color.White("%v\n", err)
+		Log.SetLevel(Logger.WarnLevel)
+	case 2:
+		Log.SetLevel(Logger.InfoLevel)
+	case 3:
+		Log.SetLevel(Logger.DebugLevel)
+	case 4:
+		Log.SetReportCaller(true)
+		Log.SetLevel(Logger.TraceLevel)
+	default:
+		Log.SetLevel(Logger.InfoLevel)
 	}
-	return outErr
+	Log.Debugf("logging running in %v mode", Log.GetLevel().String())
 }
 
-// Http returns a log for a HTTP request
-func Http(r *http.Request) string {
-	msg := fmt.Sprintf("%v (%v) | IP: %v", r.RequestURI, r.Method, r.Host)
-	fmt.Printf("WEB: %v\n", msg)
-	pushLastLine(msg)
-	return msg
+// CloseLogs will close the log file correctly on shutdown
+func CloseLogs() {
+	if ljLogger != nil {
+		ljLogger.Rotate()
+		Log.Writer().Close()
+		ljLogger.Close()
+	}
+	sentry.Flush(5 * time.Second)
 }
 
 func pushLastLine(line interface{}) {
@@ -144,7 +213,7 @@ func pushLastLine(line interface{}) {
 }
 
 // GetLastLine returns 1 line for a recent log entry
-func GetLastLine() *LogRow {
+func GetLastLine() *logRow {
 	LockLines.Lock()
 	defer LockLines.Unlock()
 	if len(LastLines) > 0 {
@@ -153,19 +222,19 @@ func GetLastLine() *LogRow {
 	return nil
 }
 
-type LogRow struct {
+type logRow struct {
 	Date time.Time
 	Line interface{}
 }
 
-func newLogRow(line interface{}) (logRow *LogRow) {
-	logRow = new(LogRow)
-	logRow.Date = time.Now()
-	logRow.Line = line
+func newLogRow(line interface{}) (lgRow *logRow) {
+	lgRow = new(logRow)
+	lgRow.Date = time.Now()
+	lgRow.Line = line
 	return
 }
 
-func (o *LogRow) lineAsString() string {
+func (o *logRow) lineAsString() string {
 	switch v := o.Line.(type) {
 	case string:
 		return v
@@ -177,6 +246,6 @@ func (o *LogRow) lineAsString() string {
 	return ""
 }
 
-func (o *LogRow) FormatForHtml() string {
+func (o *logRow) FormatForHtml() string {
 	return fmt.Sprintf("%s: %s", o.Date.Format("2006-01-02 15:04:05"), o.lineAsString())
 }

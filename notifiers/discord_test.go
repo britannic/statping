@@ -1,99 +1,66 @@
-// Statping
-// Copyright (C) 2018.  Hunter Long and the project contributors
-// Written by Hunter Long <info@socialeck.com> and the project contributors
-//
-// https://github.com/hunterlong/statping
-//
-// The licenses for most software and other practical works are designed
-// to take away your freedom to share and change the works.  By contrast,
-// the GNU General Public License is intended to guarantee your freedom to
-// share and change all versions of a program--to make sure it remains free
-// software for all its users.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 package notifiers
 
 import (
-	"github.com/britannic/statping/core/notifier"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/statping/statping/database"
+	"github.com/statping/statping/types/notifications"
+	"github.com/statping/statping/types/null"
+	"github.com/statping/statping/utils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
-	DISCORD_URL    = os.Getenv("DISCORD_URL")
+	DISCORD_URL    = utils.Params.GetString("DISCORD_URL")
 	discordMessage = `{"content": "The discord notifier on Statping has been tested!"}`
 )
 
 func init() {
 	DISCORD_URL = os.Getenv("DISCORD_URL")
-	Discorder.Host = DISCORD_URL
 }
 
 func TestDiscordNotifier(t *testing.T) {
-	t.Parallel()
+	db, err := database.OpenTester()
+	require.Nil(t, err)
+	db.AutoMigrate(&notifications.Notification{})
+	notifications.SetDB(db)
+
 	if DISCORD_URL == "" {
 		t.Log("discord notifier testing skipped, missing DISCORD_URL environment variable")
 		t.SkipNow()
 	}
-	currentCount = CountNotifiers()
 
 	t.Run("Load discord", func(t *testing.T) {
 		Discorder.Host = DISCORD_URL
 		Discorder.Delay = time.Duration(100 * time.Millisecond)
-		err := notifier.AddNotifiers(Discorder)
-		assert.Nil(t, err)
+		Discorder.Enabled = null.NewNullBool(true)
+
+		Add(Discorder)
+
 		assert.Equal(t, "Hunter Long", Discorder.Author)
 		assert.Equal(t, DISCORD_URL, Discorder.Host)
 	})
 
 	t.Run("discord Notifier Tester", func(t *testing.T) {
-		assert.True(t, Discorder.CanTest())
-	})
-
-	t.Run("discord Within Limits", func(t *testing.T) {
-		ok, err := Discorder.WithinLimits()
-		assert.Nil(t, err)
-		assert.True(t, ok)
+		assert.True(t, Discorder.CanSend())
 	})
 
 	t.Run("discord OnFailure", func(t *testing.T) {
-		Discorder.OnFailure(TestService, TestFailure)
-		assert.Equal(t, 1, len(Discorder.Queue))
+		err := Discorder.OnFailure(exampleService, exampleFailure)
+		assert.Nil(t, err)
 	})
 
 	t.Run("discord OnSuccess", func(t *testing.T) {
-		Discorder.OnSuccess(TestService)
-		assert.Equal(t, 1, len(Discorder.Queue))
-	})
-
-	t.Run("discord Check Back Online", func(t *testing.T) {
-		assert.True(t, TestService.Online)
-	})
-
-	t.Run("discord OnSuccess Again", func(t *testing.T) {
-		Discorder.OnSuccess(TestService)
-		assert.Equal(t, 1, len(Discorder.Queue))
-	})
-
-	t.Run("discord Send", func(t *testing.T) {
-		err := Discorder.Send(discordMessage)
+		err := Discorder.OnSuccess(exampleService)
 		assert.Nil(t, err)
 	})
 
 	t.Run("discord Test", func(t *testing.T) {
-		err := Discorder.OnTest()
+		_, err := Discorder.OnTest()
 		assert.Nil(t, err)
-	})
-
-	t.Run("discord Queue", func(t *testing.T) {
-		go notifier.Queue(Discorder)
-		time.Sleep(1 * time.Second)
-		assert.Equal(t, DISCORD_URL, Discorder.Host)
-		assert.Equal(t, 0, len(Discorder.Queue))
 	})
 
 }

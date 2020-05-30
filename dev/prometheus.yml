@@ -1,0 +1,28 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'statping_sqlite'
+    scrape_interval: 15s
+    bearer_token: 'exampleapisecret'
+    static_configs:
+      - targets: ['statping_sqlite:8080']
+
+  - job_name: 'statping_mysql'
+    scrape_interval: 15s
+    bearer_token: 'exampleapisecret'
+    static_configs:
+      - targets: ['statping_mysql:8080']
+
+  - job_name: 'statping_mariadb'
+    scrape_interval: 15s
+    bearer_token: 'exampleapisecret'
+    static_configs:
+      - targets: ['statping_mariadb:8080']
+
+  - job_name: 'statping_postgres'
+    scrape_interval: 15s
+    bearer_token: 'exampleapisecret'
+    static_configs:
+      - targets: ['statping_postgres:8080']
